@@ -1,0 +1,24 @@
+{
+  "name": "keuangan-chat",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Pencatatan keuangan lewat chat - rule based parser, multi-user household, Supabase",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test/parser.test.js && node test/splitter.test.js",
+    "test:all": "node test/parser.test.js && node test/splitter.test.js && node test/e2e.test.js",
+    "test:worker": "npm --prefix deploy test",
+    "check:worker": "npm --prefix deploy run check"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3"
+  }
+}

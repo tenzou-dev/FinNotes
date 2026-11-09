@@ -1,0 +1,21 @@
+name = "kasir-chat"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Aset statis (HTML/CSS/JS frontend) dilayani Cloudflare lewat [assets].
+# run_worker_first = true: Worker selalu dieksekusi lebih dulu, lalu
+# meneruskan permintaan non-API ke binding ASSETS (lihat worker.js).
+# Ini membuat perilaku routing eksplisit dan tidak bergantung versi wrangler.
+[assets]
+directory = "../public"
+binding = "ASSETS"
+run_worker_first = true
+
+# Nilai non-secret (aman ditulis di file).
+# Ganti dengan URL project Supabase kamu.
+[vars]
+SUPABASE_URL = "https://uuqlsxpmrefxhldkimpv.supabase.co"
+
+# SUPABASE_ANON_KEY JANGAN ditulis di sini.
+# Pakai: npx wrangler secret put SUPABASE_ANON_KEY

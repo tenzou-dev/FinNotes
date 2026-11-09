@@ -1,0 +1,11 @@
+node_modules/
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.log
+.env
+.env.local
+deploy/.dev.vars
+deploy/.wrangler/
+deploy/.wrangler-dryrun/
+.DS_Store

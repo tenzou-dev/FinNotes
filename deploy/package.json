@@ -1,0 +1,25 @@
+{
+  "name": "kasir-chat-deploy",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Kasir Chat - Cloudflare Worker + Supabase",
+  "type": "module",
+  "main": "worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "check": "node check-worker-deps.mjs",
+    "test": "node test/worker.test.mjs",
+    "test:live": "node test/live.e2e.mjs",
+    "verify:live": "node test/verify-live.mjs",
+    "test:dry": "wrangler deploy --dry-run --outdir .wrangler-dryrun",
+    "secret": "wrangler secret put SUPABASE_ANON_KEY"
+  },
+  "devDependencies": {
+    "wrangler": "^4.143.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2"
+  }
+}

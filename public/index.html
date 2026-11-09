@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Kasir Chat - Catat Keuangan dari Chat</title>
+<link rel="stylesheet" href="./styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">💬</span>
+    <div>
+      <h1>Kasir Chat</h1>
+      <p class="brand-sub" id="houseLabel">Memuat...</p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <div class="segmented" id="periodTabs" role="tablist">
+      <button class="seg-btn" data-period="today">Hari Ini</button>
+      <button class="seg-btn is-active" data-period="month">Bulan Ini</button>
+      <button class="seg-btn" data-period="all">Semua</button>
+    </div>
+    <button class="icon-btn" id="btnMenu" title="Menu">☰</button>
+  </div>
+</header>
+
+<div class="menu" id="menu" hidden>
+  <div class="menu-inner">
+    <div class="menu-row">
+      <span>Masuk sebagai</span>
+      <strong id="whoami">-</strong>
+    </div>
+    <div class="menu-row" id="joinRow" hidden>
+      <span>Kode undangan</span>
+      <strong class="code" id="joinCode">-</strong>
+    </div>
+    <div class="menu-members" id="members"></div>
+    <div class="menu-acts">
+      <a class="menu-link" href="/api/export/transactions.csv">⬇ Export Transaksi (CSV)</a>
+      <a class="menu-link" href="/api/export/summary.csv">⬇ Export Rekap (CSV)</a>
+      <a class="menu-link" href="/api/export/json">⬇ Backup JSON</a>
+      <button class="menu-link danger" id="btnReset">🗑 Hapus semua transaksi</button>
+      <button class="menu-link" id="btnLogout">↪ Keluar</button>
+    </div>
+    <p class="menu-note" id="backendNote"></p>
+  </div>
+</div>
+
+<section class="stats" id="stats">
+  <div class="stat stat-balance">
+    <span class="stat-label">Saldo</span>
+    <strong class="stat-value" id="vBalance">Rp0</strong>
+    <span class="stat-delta" id="dBalance"></span>
+  </div>
+  <div class="stat stat-in">
+    <span class="stat-label">Pemasukan</span>
+    <strong class="stat-value" id="vIncome">Rp0</strong>
+    <span class="stat-delta" id="dIncome"></span>
+  </div>
+  <div class="stat stat-out">
+    <span class="stat-label">Pengeluaran</span>
+    <strong class="stat-value" id="vExpense">Rp0</strong>
+    <span class="stat-delta" id="dExpense"></span>
+  </div>
+</section>
+
+<section class="insights" id="insights">
+  <div class="insight-tabs" id="insightTabs">
+    <button class="itab is-active" data-range="month">Bulanan</button>
+    <button class="itab" data-range="week">7 Hari</button>
+    <button class="itab" data-range="today">Hari Ini</button>
+    <button class="itab" data-range="year">Tahunan</button>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-head">
+      <h2 id="chartTitle">Pengeluaran per Kategori</h2>
+      <span class="card-sub" id="chartSub"></span>
+    </div>
+    <div class="donut-wrap">
+      <svg class="donut" id="donut" viewBox="0 0 42 42" role="img" aria-label="Grafik pengeluaran per kategori"></svg>
+      <div class="donut-center">
+        <span class="donut-label">Total</span>
+        <strong id="donutTotal">Rp0</strong>
+      </div>
+    </div>
+    <ul class="legend" id="legend"></ul>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Tren Harian</h2>
+      <span class="card-sub">pemasukan vs pengeluaran</span>
+    </div>
+    <div class="bars" id="bars"></div>
+    <div class="bars-axis" id="barsAxis"></div>
+  </div>
+</section>
+
+<section class="filters" id="filters">
+  <input type="search" id="search" class="search" placeholder="Cari transaksi..." autocomplete="off" />
+  <div class="chips" id="chips">
+    <button class="chip is-active" data-filter="all">Semua</button>
+    <button class="chip" data-filter="income">Masuk</button>
+    <button class="chip" data-filter="expense">Keluar</button>
+  </div>
+</section>
+
+<section class="mutasi">
+  <div class="mutasi-head">
+    <h2>Riwayat Transaksi</h2>
+    <span class="mutasi-count" id="txCount">0 transaksi</span>
+  </div>
+  <ul class="tx-list" id="txList"></ul>
+  <p class="empty" id="txEmpty">Belum ada transaksi. Mulai dari chat di bawah 👇</p>
+</section>
+
+<section class="chat" id="chat">
+  <div class="chat-log" id="chatLog"></div>
+  <div class="chat-suggest" id="suggest"></div>
+  <form class="chat-input" id="chatForm">
+    <button type="button" class="icon-btn ghost" id="btnHelp" title="Bantuan">?</button>
+    <input id="msgInput" type="text" placeholder="Tulis transaksi, misal: gaji 1jt" autocomplete="off" enterkeyhint="send" />
+    <button type="submit" class="send-btn" aria-label="Kirim">➤</button>
+  </form>
+</section>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-card">
+    <div class="card-head">
+      <h2 id="sheetTitle">Ubah Transaksi</h2>
+      <button class="icon-btn ghost" id="sheetClose">✕</button>
+    </div>
+    <div class="field">
+      <label>Jenis</label>
+      <div class="chips tight" id="sheetType">
+        <button class="chip" data-type="income">Pemasukan</button>
+        <button class="chip" data-type="expense">Pengeluaran</button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="sNote">Keterangan</label>
+      <input id="sNote" type="text" />
+    </div>
+    <div class="field">
+      <label for="sAmount">Nominal</label>
+      <input id="sAmount" type="text" inputmode="numeric" />
+    </div>
+    <div class="field">
+      <label for="sDate">Tanggal</label>
+      <input id="sDate" type="date" />
+    </div>
+    <div class="field">
+      <label for="sCategory">Kategori</label>
+      <select id="sCategory"></select>
+    </div>
+    <button class="auth-btn" id="sheetSave">Simpan Perubahan</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
+

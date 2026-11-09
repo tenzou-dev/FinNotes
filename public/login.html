@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Kasir Chat - Masuk</title>
+<link rel="stylesheet" href="./styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
+</head>
+<body class="auth-body">
+
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="brand-mark">💬</span>
+      <h1>Kasir Chat</h1>
+      <p>Catat keuangan kamu & istri dalam satu buku</p>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab is-active" data-mode="login">Masuk</button>
+      <button class="auth-tab" data-mode="signup">Daftar</button>
+    </div>
+
+    <form id="authForm" autocomplete="on">
+      <div class="field" data-only="signup" hidden>
+        <label for="fName">Nama</label>
+        <input id="fName" type="text" placeholder="Nama kamu" autocomplete="name" />
+      </div>
+
+      <div class="field">
+        <label for="fEmail">Email</label>
+        <input id="fEmail" type="email" required placeholder="kamu@email.com" autocomplete="email" />
+      </div>
+
+      <div class="field">
+        <label for="fPass">Password</label>
+        <input id="fPass" type="password" required minlength="6" placeholder="Minimal 6 karakter" autocomplete="current-password" />
+      </div>
+
+      <div class="field" data-only="signup" hidden>
+        <label for="fHouse">Nama Buku</label>
+        <input id="fHouse" type="text" placeholder="Rumah Tangga" value="Rumah Tangga" />
+      </div>
+
+      <details class="join-box" data-only="signup" hidden>
+        <summary>Sudah punya kode undangan?</summary>
+        <div class="field">
+          <label for="fCode">Kode Undangan</label>
+          <input id="fCode" type="text" placeholder="Contoh: K7X2MQ" maxlength="6" style="text-transform:uppercase" />
+          <small>Masuk ke buku pasangan yang sudah ada.</small>
+        </div>
+      </details>
+
+      <p class="auth-err" id="authErr" hidden></p>
+      <button type="submit" class="auth-btn" id="authBtn">Masuk</button>
+    </form>
+
+    <p class="auth-hint" id="authHint"></p>
+  </div>
+</div>
+
+<script src="./auth.js"></script>
+</body>
+</html>
