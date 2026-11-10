@@ -1,5 +1,5 @@
 /**
- * Worker Cloudflare untuk Kasir Chat.
+ * Worker Cloudflare untuk FinNotes.
  *
  * Semua query memakai token user (bearer), tidak pernah service_role,
  * jadi Row Level Security Supabase tetap berlaku.

@@ -1,10 +1,10 @@
-# Kasir Chat
+# FinNotes
 
 Pencatatan keuangan lewat chat bahasa Indonesia. Ketik seperti ngobrol,
 aplikasinya yang mem-parse, membuat transaksi, menghitung saldo, dan menyimpan
 riwayat.
 
-Multi-user: dua akun (misalnya kamu dan istri) melihat **buku keuangan yang sama**.
+Multi-user: dua akun (misalnya kamu dan partnermu) melihat **buku keuangan yang sama**.
 
 ## Fitur
 
@@ -80,7 +80,7 @@ free tier (sekitar 2-4 signup per jam). Gejalanya user melihat
 Verifikasi lewat Worker (butuh login):
 
 ```bash
-curl -X POST https://kasir-chat.badminton-iiknu.workers.dev/api/auth/signup \
+curl -X POST https://finnotes.tenzou-dev.workers.dev/api/auth/signup \
   -H "Content-Type: application/json" \
   -d '{"email":"tes@gmail.com","password":"rahasia123456","name":"Tes","householdName":"Tes"}'
 ```

@@ -10,7 +10,7 @@ const B = process.env.WORKER_URL || 'https://finnotes.tenzou-dev.workers.dev';
   r = await fetch(B + '/');
   const h = await r.text();
   console.log('index   ', r.status, h.length + ' bytes');
-  console.log('  title  ', h.includes('Kasir Chat') ? 'OK' : 'MISSING');
+  console.log('  title  ', h.includes('FinNotes') ? 'OK' : 'MISSING');
   console.log('  module ', h.includes('type="module"') ? 'OK' : 'MISSING');
 
   r = await fetch(B + '/api/tidak-ada');

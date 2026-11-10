@@ -252,7 +252,7 @@ function attachPick(node, extra) {
 function renderMessages() {
   el.chatLog.innerHTML = '';
   if (!state.messages.length) {
-    addMsg('bot', 'Halo! Aku Kasir Chat.\n\nTulis transaksi seperti ngobrol, misalnya:\n"gaji 1jt"\n"bayar angsuran 350rb"\n"beli nasi 25rb sama kopi 15rb"\n\nAku yang nebak itu pemasukan atau pengeluaran. Ketik "bantu" untuk contoh lengkap.');
+    addMsg('bot', 'Halo! Aku FinNotes.\n\nTulis transaksi seperti ngobrol, misalnya:\n"gaji 1jt"\n"bayar angsuran 350rb"\n"beli nasi 25rb sama kopi 15rb"\n\nAku yang nebak itu pemasukan atau pengeluaran. Ketik "bantu" untuk contoh lengkap.');
   } else {
     for (const m of state.messages) {
       if (m.role === 'user') addMsg('user', m.text, clockOf(m.createdAt));

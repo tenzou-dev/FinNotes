@@ -291,7 +291,7 @@ app.use((err, req, res, _next) => {
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`\n  Kasir Chat v0.2  ->  http://localhost:${PORT}`);
+    console.log(`\n  FinNotes v0.2  ->  http://localhost:${PORT}`);
     console.log(`  backend: ${store.BACKEND}\n`);
   });
 }

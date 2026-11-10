@@ -1,8 +1,8 @@
 {
-  "name": "kasir-chat-deploy",
+  "name": "finnotes-deploy",
   "version": "0.2.0",
   "private": true,
-  "description": "Kasir Chat - Cloudflare Worker + Supabase",
+  "description": "FinNotes - Cloudflare Worker + Supabase",
   "type": "module",
   "main": "worker.js",
   "scripts": {

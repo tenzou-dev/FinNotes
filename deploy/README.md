@@ -1,6 +1,6 @@
-# Kasir Chat – Deploy Cloudflare Workers + Supabase
+# FinNotes – Deploy Cloudflare Workers + Supabase
 
-Folder ini berisi konfigurasi untuk meng-deploy aplikasi Kasir Chat sebagai **Cloudflare Workers + Static Assets** (bukan Pages). Worker menjalankan API (Fetch API), sedangkan file statis dari `public/` disajikan oleh `ASSETS`.
+Folder ini berisi konfigurasi untuk meng-deploy aplikasi FinNotes sebagai **Cloudflare Workers + Static Assets** (bukan Pages). Worker menjalankan API (Fetch API), sedangkan file statis dari `public/` disajikan oleh `ASSETS`.
 
 ## 1. Jalankan schema Supabase
 

@@ -1,5 +1,5 @@
 -- ============================================================
--- Kasir Chat - Supabase schema
+-- FinNotes - Supabase schema
 -- Jalankan di Supabase Dashboard > SQL Editor > New query > Run
 -- ============================================================
 
