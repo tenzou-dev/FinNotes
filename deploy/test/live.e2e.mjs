@@ -49,7 +49,8 @@ try {
   const meA = await call('GET', '/api/auth/me', { token: tA });
   ok('me nama user', meA.data.user?.name === 'Andi', JSON.stringify(meA.data.user));
   ok('me punya 1 household', meA.data.households?.length === 1, JSON.stringify(meA.data.households));
-  ok('punya role member', meA.data.households?.[0]?.role === 'member', meA.data.households?.[0]?.role);
+  // Pembuat household adalah owner (schema.sql setup_my_household -> role 'owner')
+  ok('pembuat household berperan owner', meA.data.households?.[0]?.role === 'owner', meA.data.households?.[0]?.role);
 
   section('signup kedua + gabung via kode');
   const siti = await call('POST', '/api/auth/signup', {
@@ -59,6 +60,9 @@ try {
   ok('Siti masuk household Andi', siti.data.household?.id === andi.data.household.id, `${siti.data.household?.id} vs ${andi.data.household.id}`);
   ok('gabung tanpa warning', !siti.data.warning, siti.data.warning);
   const tB = siti.data.token;
+  // Yang gabung lewat kode berperan member (schema.sql join_household -> role 'member')
+  const meB = await call('GET', '/api/auth/me', { token: tB });
+  ok('yang gabung lewat kode berperan member', meB.data.households?.[0]?.role === 'member', meB.data.households?.[0]?.role);
 
   section('RLS: data bersama & isolasi');
   const c1 = await call('POST', '/api/chat', { token: tA, body: { text: 'gaji 5jt' } });
@@ -97,7 +101,9 @@ try {
   ok('Zaki bisa catat transaksi', cZ.status === 200 && cZ.data.transaction?.amount === 2000000, JSON.stringify(cZ.data).slice(0, 140));
 
   section('edit & hapus');
-  const target = stZ.data.transactions[0];
+  // Target harus transaksi milik Zaki yang baru saja dicatat (cZ), bukan stZ
+  // yang diambil sebelum Zaki mencatat apa pun.
+  const target = cZ.data.transaction;
   const pa = await call('PATCH', '/api/transactions/' + target.id, { token: zaki.data.token, body: { amount: 2500000 } });
   ok('patch 200', pa.status === 200 && pa.data.transaction?.amount === 2500000, JSON.stringify(pa.data).slice(0, 140));
   const de = await call('DELETE', '/api/transactions/' + target.id, { token: zaki.data.token });
@@ -120,11 +126,13 @@ try {
   ok('chat tanpa text -> 400', (await call('POST', '/api/chat', { token: tA, body: {} })).status === 400);
 
   section('export');
-  const csv = await fetch(B + '/api/export/csv', { headers: { Authorization: 'Bearer ' + tB } });
-  const csvText = await csv.text();
+  const csv = await fetch(B + '/api/export/transactions.csv', { headers: { Authorization: 'Bearer ' + tB } });
+  const csvBuf = Buffer.from(await csv.arrayBuffer());
+  // BOM harus dicek dari byte mentah: Response.text() melepas BOM saat decode UTF-8.
+  const csvText = csvBuf.toString('utf8');
   ok('csv 200', csv.status === 200, csv.status);
-  ok('csv ada BOM', csvText.charCodeAt(0) === 0xfeff);
-  ok('csv ada data', csvText.includes('Kopi') || csvText.includes('KOPI'), csvText.slice(0, 120));
+  ok('csv ada BOM', csvBuf[0] === 0xef && csvBuf[1] === 0xbb && csvBuf[2] === 0xbf, Array.from(csvBuf.slice(0, 3)).join(','));
+  ok('csv ada data', csvText.toLowerCase().includes('kopi'), csvText.slice(0, 120));
   ok('csv content-disposition', /attachment/.test(csv.headers.get('content-disposition') || ''), csv.headers.get('content-disposition'));
 } catch (e) {
   if (!String(e.message).startsWith('SKIP:')) {
