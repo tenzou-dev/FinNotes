@@ -1,4 +1,4 @@
-const B = 'https://kasir-chat.badminton-iiknu.workers.dev';
+const B = process.env.WORKER_URL || 'https://finnotes.tenzou-dev.workers.dev';
 
 (async () => {
   let r = await fetch(B + '/api/config');

@@ -49,6 +49,16 @@ function mapAuthError(msg) {
   if (/already registered/i.test(msg)) return 'Email sudah terdaftar';
   if (/password should be at least/i.test(msg)) return 'Password minimal 6 karakter';
   if (/email not confirmed/i.test(msg)) return 'Email belum dikonfirmasi, cek inbox dulu';
+  // Project paused (HTTP 540): edge Supabase menjawab tanpa pesan, supabase-js
+  // meneruskannya sebagai "<none>". fetch gagal total muncul sebagai
+  // "fetch failed" (Node) atau "internal error; reference = ..." (workerd).
+  const unreachable = /^<none>$/i.test(String(msg).trim())
+    || /fetch failed|failed to fetch|load failed/i.test(msg)
+    || /internal error; reference/i.test(msg)
+    || /network|ENOTFOUND|ECONNREFUSED/i.test(msg);
+  if (unreachable) {
+    return 'Tidak bisa menghubungi Supabase. Cek apakah project aktif (project free tier bisa di-pause) di supabase.com/dashboard.';
+  }
   return msg;
 }
 

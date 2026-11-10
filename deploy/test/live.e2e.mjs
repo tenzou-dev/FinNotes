@@ -3,7 +3,7 @@
  * Butuh env WORKER_URL. Email memakai gmail.com karena Supabase memblokir
  * domain sekali pakai seperti t.com.
  */
-const B = process.env.WORKER_URL || 'https://kasir-chat.badminton-iiknu.workers.dev';
+const B = process.env.WORKER_URL || 'https://finnotes.tenzou-dev.workers.dev';
 const MAIL = (n) => `kjtest.${n}.${Date.now()}@gmail.com`;
 
 let pass = 0;
