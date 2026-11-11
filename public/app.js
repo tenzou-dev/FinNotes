@@ -92,7 +92,7 @@ function renderDonut(rows, total, centerLabel) {
   track.setAttribute('r', R);
   track.setAttribute('cx', '21'); track.setAttribute('cy', '21');
   track.setAttribute('fill', 'none');
-  track.setAttribute('stroke', '#202c33');
+  track.style.stroke = 'var(--line-soft)';
   track.setAttribute('stroke-width', '5');
   el.donut.appendChild(track);
 
@@ -169,7 +169,7 @@ async function loadAnalytics() {
     renderStats();
 
     if (a.members?.length > 1) {
-      el.members.innerHTML = a.members.map((m) => `<span class="member">👤 ${esc(m.name)}</span>`).join('');
+      el.members.innerHTML = a.members.map((m) => `<span class="member">${esc(m.name)}</span>`).join('');
     } else {
       el.members.innerHTML = '';
     }
@@ -193,11 +193,11 @@ function renderTx() {
       <div class="tx-icon">${iconFor(t.category)}</div>
       <div class="tx-body">
         <div class="tx-note">${esc(t.note)}</div>
-        <div class="tx-meta">${esc(t.category)} · ${humanDate(t.date)}${t.author ? ' · ' + esc(t.author) : ''}</div>
+        <div class="tx-meta"><span class="tx-cat">${esc(t.category)}</span> · ${humanDate(t.date)}${t.author ? ' · ' + esc(t.author) : ''}</div>
       </div>
       <div class="tx-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${rp(t.amount)}</div>
-      <button class="tx-edit" data-act="edit" title="Ubah">✎</button>
-      <button class="tx-del" data-act="del" title="Hapus">✕</button>
+      <button class="tx-edit" data-act="edit" title="Ubah"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 20l4.5-1L20 7.5 16.5 4 5 15.5 4 20z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+      <button class="tx-del" data-act="del" title="Hapus"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </li>`).join('');
 
   el.txCount.textContent = `${list.length} transaksi`;
@@ -404,7 +404,7 @@ async function boot() {
       clearSession();
       location.href = './login.html';
     } else {
-      document.body.innerHTML = `<div style="padding:40px;text-align:center"><h2>Gagal memuat</h2><p style="color:#8696a0">${esc(e.message)}</p></div>`;
+      document.body.innerHTML = `<div style="padding:40px;text-align:center"><h2 style="font-family:Georgia,serif">Gagal memuat</h2><p style="color:#8a8371">${esc(e.message)}</p></div>`;
     }
   }
 }

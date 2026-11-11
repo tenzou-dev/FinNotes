@@ -6,6 +6,12 @@ riwayat.
 
 Multi-user: dua akun (misalnya kamu dan partnermu) melihat **buku keuangan yang sama**.
 
+## Tampilan
+
+![Halaman login FinNotes](docs/img/login.png)
+
+![Aplikasi FinNotes: saldo, grafik kategori, riwayat, dan chat pencatat transaksi](docs/img/app.png)
+
 ## Demo
 
 - **<https://finnotes.tenzou.dev>** — produksi, di-deploy otomatis dari repo ini
@@ -163,7 +169,7 @@ multi-transaksi, analytics semua periode, export, edit, hapus, dan login ulang.
 Suite Worker (mock Supabase, tanpa jaringan):
 
 ```bash
-npm run test:worker  # 89 test
+npm run test:worker  # 99 test
 npm run check:worker # pastikan bundle tidak pull API Node
 ```
 

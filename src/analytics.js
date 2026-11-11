@@ -3,17 +3,17 @@
 const { formatIDR } = require('./parser');
 
 const CAT_COLORS = {
-  'Gaji': '#00a884', 'Bonus': '#53bdeb', 'Pendapatan': '#7c8ef5', 'Refund': '#4dd0c1',
-  'Transfer Masuk': '#5ac8fa', 'Komisi': '#8bc34a', 'Investasi': '#26a69a', 'Bantuan': '#7cb342',
-  'Jualan': '#ffb02e', 'Lainnya (Masuk)': '#78909c',
-  'Cicilan': '#f15c6d', 'Tagihan': '#ef5350', 'Transportasi': '#ff7043', 'Kesehatan': '#ec407a',
-  'Pendidikan': '#ab47bc', 'Sosial': '#8d6e63', 'Makan & Minum': '#ffa726', 'Belanja': '#ffca28',
-  'Hiburan': '#ba68c8', 'Bayar': '#f06292', 'Tabungan': '#66bb6a', 'Lainnya': '#90a4ae',
+  'Gaji': '#1e6b4e', 'Bonus': '#4a8a5c', 'Pendapatan': '#3e7d8a', 'Refund': '#7d9c6d',
+  'Transfer Masuk': '#557d9c', 'Komisi': '#6d8f5e', 'Investasi': '#4a7d74', 'Bantuan': '#9c8f4a',
+  'Jualan': '#b3893c', 'Lainnya (Masuk)': '#8c8578',
+  'Cicilan': '#9c4a3c', 'Tagihan': '#b3782e', 'Transportasi': '#5f7d8c', 'Kesehatan': '#a84a52',
+  'Pendidikan': '#7a5ea0', 'Sosial': '#8f6d55', 'Makan & Minum': '#b3552e', 'Belanja': '#8a6d3b',
+  'Hiburan': '#a05a78', 'Bayar': '#6b8f71', 'Tabungan': '#5e7d5a', 'Lainnya': '#8c8578',
 };
 
 function colorFor(category, index = 0) {
   if (CAT_COLORS[category]) return CAT_COLORS[category];
-  const fallback = ['#4db6ac', '#7986cb', '#e57373', '#ffd54f', '#a1887f', '#90caf9'];
+  const fallback = ['#8c6d4f', '#5e7d8c', '#a05a78', '#b3782e', '#6d7d5e', '#7a6a8f'];
   let h = 0;
   for (const ch of String(category)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return fallback[h % fallback.length];
