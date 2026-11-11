@@ -1,4 +1,4 @@
-const B = process.env.WORKER_URL || 'https://finnotes.tenzou-dev.workers.dev';
+const B = process.env.WORKER_URL || 'https://finnotes.tenzou.dev';
 
 (async () => {
   let r = await fetch(B + '/api/config');

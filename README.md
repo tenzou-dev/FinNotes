@@ -6,6 +6,12 @@ riwayat.
 
 Multi-user: dua akun (misalnya kamu dan partnermu) melihat **buku keuangan yang sama**.
 
+## Demo
+
+- **<https://finnotes.tenzou.dev>** — produksi, di-deploy otomatis dari repo ini
+  tiap ada push ke `main` (Cloudflare Workers Builds + Supabase)
+- <https://finnotes.tenzou-dev.workers.dev> — URL alternatif Worker yang sama
+
 ## Fitur
 
 - Parser bahasa Indonesia tanpa API eksternal: `gaji 8jt`, `beli nasi 25rb sama kopi 15rb`
@@ -80,7 +86,7 @@ free tier (sekitar 2-4 signup per jam). Gejalanya user melihat
 Verifikasi lewat Worker (butuh login):
 
 ```bash
-curl -X POST https://finnotes.tenzou-dev.workers.dev/api/auth/signup \
+curl -X POST https://finnotes.tenzou.dev/api/auth/signup \
   -H "Content-Type: application/json" \
   -d '{"email":"tes@gmail.com","password":"rahasia123456","name":"Tes","householdName":"Tes"}'
 ```

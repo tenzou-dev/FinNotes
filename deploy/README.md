@@ -2,6 +2,11 @@
 
 Folder ini berisi konfigurasi untuk meng-deploy aplikasi FinNotes sebagai **Cloudflare Workers + Static Assets** (bukan Pages). Worker menjalankan API (Fetch API), sedangkan file statis dari `public/` disajikan oleh `ASSETS`.
 
+Hasil deploy live: **<https://finnotes.tenzou.dev>** (custom domain di zone `tenzou.dev`,
+dipasang via Worker Settings -> Domains & Routes -> Add -> Custom Domain; DNS record dan
+sertifikat dibuat otomatis Cloudflare). Setiap push ke `main` di-deploy otomatis oleh
+Workers Builds; alternatif URL: <https://finnotes.tenzou-dev.workers.dev>.
+
 ## 1. Jalankan schema Supabase
 
 1. Buka [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql).
