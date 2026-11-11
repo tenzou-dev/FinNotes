@@ -1,6 +1,6 @@
 'use strict';
 
-const { parse } = require('./parser');
+const { parse, stripDateSpans } = require('./parser');
 
 const NUM_GLOBAL =
   /(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:ribu|jt|juta|miliar|ml|rb|k|j|m)?/gi;
@@ -26,7 +26,11 @@ function isSplitPoint(c, amountSpans) {
 }
 
 function splitText(text) {
-  const amountSpans = spans(NUM_GLOBAL, text);
+  // Nominal dihitung pada salinan yang tanggalnya sudah di-blank.
+  // stripDateSpans menjaga panjang teks (spasi per karakter), jadi
+  // indeks span tetap valid untuk teks asli yang di-slice di bawah --
+  // angka di "tgl 27 okt 2026" tidak dianggap nominal pemisah.
+  const amountSpans = spans(NUM_GLOBAL, stripDateSpans(text));
   if (amountSpans.length < 2) return [text];
 
   const candidates = [

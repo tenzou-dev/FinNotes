@@ -36,7 +36,7 @@ const UNIT = {
 };
 
 const NUM_RE = /(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:ribu|jt|juta|miliar|ml|rb|k|j|m)?/gi;
-const RP_RE = /(?:^|\s)(?:rp\.?|idr|rupiah)\s*/gi;
+const RP_RE = /(?:^|\s)(?:rp\.?|idr|rupiah|sebesar|sbesar|senilai)\s*/gi;
 
 const CANCEL_RE = /\b(gak|nggak|ndak|nanti|jangan|belum|batal)\b/i;
 const PLUS_RE = /^\s*\+|(?:^|\s)(tambah|tambahin|nambah|nambahin)\b/i;
@@ -51,27 +51,62 @@ const CONTEXT_RULES = [
   { re: /\b(?:dari|ke)\s+(?:rekening|rek|tabungan|bank)\b/i, type: null },
 ];
 
-// spec returned by fn(): { days, months, y, mo (0-based), d }
-const DATE_RES = [
-  { re: /\b(?:hari\s*ini|tadi\s*pagi|tadi\s*malam)\b/, fn: () => ({ days: 0 }) },
-  { re: /\bkemarin\s*lusa\b/, fn: () => ({ days: -2 }) },
-  { re: /\bkemarin\b/, fn: () => ({ days: -1 }) },
-  { re: /\b(\d{1,2})\s*bulan\s*lalu\b/, fn: (m) => ({ months: -Math.abs(+m[1]) }) },
-  { re: /\b(\d{1,2})\s*(?:hari|minggu)\s*lalu\b/, fn: (m) => ({ days: -Math.abs(+m[1]) * (/minggu/.test(m[0]) ? 7 : 1) }) },
-  { re: /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/, fn: (m) => ({ y: +m[1], mo: +m[2] - 1, d: +m[3] }) },
-  { re: /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/, fn: (m) => ({ y: fixYear(m[3]), mo: +m[2] - 1, d: +m[1] }) },
-  { re: /\b(\d{1,2})\/(\d{1,2})\b/, fn: (m) => ({ d: +m[1], mo: +m[2] - 1 }) },
-  {
-    re: /\b(\d{1,2})\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|ags|sep|oct|nov|des)\b(?:\s+(\d{4}))?/i,
-    fn: (m) => ({ d: +m[1], mo: MONTH_IDX[m[2].toLowerCase()], y: m[3] ? +m[3] : undefined }),
-  },
-];
+// Nama & singkatan bulan (Indonesia + singkatan Inggris yang sering tercampur).
+// Urutan alternatif: nama lengkap dulu, singkatan belakangan (backtracking
+// regex tetap benar, tapi urutan ini paling mudah dibaca).
+const MONTHS_RE = 'januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|ags|agt|sep|sept|okt|oct|nov|des';
 
 const MONTH_IDX = {
   januari: 0, februari: 1, maret: 2, april: 3, mei: 4, juni: 5, juli: 6,
   agustus: 7, september: 8, oktober: 9, november: 10, desember: 11,
-  jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, ags: 7, sep: 8, oct: 9, nov: 10, des: 11,
+  jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, ags: 7, agt: 7, sep: 8, sept: 8,
+  okt: 9, oct: 9, nov: 10, des: 11,
 };
+
+// spec returned by fn(): { days, months, y, mo (0-based), d }
+// Urutan penting: tanggal eksplisit lebih dulu supaya menang atas kata
+// relatif -- "kemarin tgl 27 okt 2026" berarti 27 okt 2026, bukan kemarin.
+const DATE_RES = [
+  { re: /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/, fn: (m) => ({ y: +m[1], mo: +m[2] - 1, d: +m[3] }) },
+  { re: /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/, fn: (m) => ({ y: fixYear(m[3]), mo: +m[2] - 1, d: +m[1] }) },
+  { re: /\b(\d{1,2})\/(\d{1,2})\b/, fn: (m) => ({ d: +m[1], mo: +m[2] - 1 }) },
+  {
+    re: new RegExp(`\\b(\\d{1,2})\\s+(${MONTHS_RE})\\b(?:\\s+(\\d{4}))?`, 'i'),
+    fn: (m) => ({ d: +m[1], mo: MONTH_IDX[m[2].toLowerCase()], y: m[3] ? +m[3] : undefined }),
+  },
+  { re: /\b(?:tgl|tanggal)\.?\s*(\d{1,2})\b/i, fn: (m) => ({ d: +m[1] }) },
+  { re: /\b(?:hari\s*ini|tadi\s*pagi|tadi\s*malam)\b/i, fn: () => ({ days: 0 }) },
+  { re: /\bkemarin\s*lusa\b/i, fn: () => ({ days: -2 }) },
+  { re: /\b(?:kemarin|kemaren|kmarin|kmrin|kmaren|kmrn)\b/i, fn: () => ({ days: -1 }) },
+  { re: /\b(\d{1,2})\s*bulan\s*lalu\b/i, fn: (m) => ({ months: -Math.abs(+m[1]) }) },
+  { re: /\b(\d{1,2})\s*(?:hari|minggu)\s*lalu\b/i, fn: (m) => ({ days: -Math.abs(+m[1]) * (/minggu/.test(m[0]) ? 7 : 1) }) },
+];
+
+// Semua bentuk tanggal, dipakai stripDateSpans(). Bentuk paling panjang
+// dulu supaya "kemarin lusa" tidak terpotong jadi "kemarin".
+const DATE_SPANS = [
+  new RegExp(`\\b\\d{1,2}\\s+(?:${MONTHS_RE})\\b(?:\\s+\\d{4})?`, 'gi'),
+  /\b\d{4}-\d{1,2}-\d{1,2}\b/g,
+  /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g,
+  /\b(?:tgl|tanggal)\.?\s*\d{1,2}\b/gi,
+  /\b\d{1,2}\s*bulan\s*lalu\b/gi,
+  /\b\d{1,2}\s*(?:hari|minggu)\s*lalu\b/gi,
+  /\b(?:kemarin\s*lusa|kemarin|kemaren|kmarin|kmrin|kmaren|kmrn)\b/gi,
+  /\b(?:hari\s*ini|tadi\s*pagi|tadi\s*malam)\b/gi,
+  /\b(?:tgl|tanggal)\b/gi,
+];
+
+/**
+ * Ganti semua ekspresi tanggal dengan spasi sepanjang span aslinya
+ * (panjang teks tetap, jadi indeks di splitter tetap valid).
+ * Dipanggil sebelum mencari nominal supaya angka di tanggal
+ * ("tgl 27 okt 2026") tidak ikut terbaca sebagai jumlah uang.
+ */
+function stripDateSpans(text) {
+  let out = String(text == null ? '' : text);
+  for (const re of DATE_SPANS) out = out.replace(re, (s) => ' '.repeat(s.length));
+  return out;
+}
 
 function fixYear(y) {
   let n = +y;
@@ -173,7 +208,9 @@ function parseNumberToken(token) {
 }
 
 function extractAmount(text) {
-  const clean = text.replace(RP_RE, ' ');
+  // Blanking tanggal dulu supaya "tgl 27 okt 2026" tidak menyumbangkan
+  // angka 27 / 2026 sebagai kandidat nominal.
+  const clean = stripDateSpans(text).replace(RP_RE, ' ');
   const matches = clean.match(NUM_RE) || [];
   const vals = matches.map(parseNumberToken).filter((v) => v !== null && v > 0);
   if (!vals.length) return null;
@@ -203,9 +240,11 @@ function extractDate(text, now = new Date()) {
 }
 
 function extractNote(text, type) {
-  let t = text.replace(RP_RE, ' ');
+  // Tanggal diblank dulu supaya angkanya ("27", "2026") tidak ikut
+  // dianggap nominal, lalu buang satuan uang, nominal, dan kata batal.
+  let t = stripDateSpans(text);
+  t = t.replace(RP_RE, ' ');
   t = t.replace(NUM_RE, ' ');
-  for (const { re } of DATE_RES) t = t.replace(re, ' ');
   t = t.replace(CANCEL_RE, ' ');
   t = t.replace(/(?:^|\s)(tambah|tambahin|kurang|kurangin|nambah|nambahin)\b/gi, ' ');
   t = t.replace(/^[\s,.:;+-]+/, '').replace(/[\s,.:;+-]+$/, '').replace(/\s{2,}/g, ' ').trim();
@@ -252,6 +291,7 @@ module.exports = {
   EXAMPLES,
   parse,
   extractAmount,
+  stripDateSpans,
   detectType,
   detectCategory,
   extractDate,

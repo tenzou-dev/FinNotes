@@ -28,4 +28,4 @@ PBKDF2_ITERATIONS = "10000"
 
 # Client ID Google OAuth untuk tombol "Lanjut dengan Google" (opsional).
 # Isi lalu buka tanda komentarnya untuk mengaktifkan:
-# GOOGLE_CLIENT_ID = "GANTI-DENGAN-CLIENT-ID.apps.googleusercontent.com"
+GOOGLE_CLIENT_ID = "601371815306-a4jkkk6qkvhhhdfqgvb6jqruf97duufi.apps.googleusercontent.com"
