@@ -46,10 +46,11 @@ async function ensureSchema() {
   // tabel belum ada (semua statement idempotent).
   const probe = await rawFirst("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'");
   if (probe) return;
-  // WAJIB await: exec() di binding D1 asli itu async -- tanpa await, DDL
-  // mengambang dan query pertama bisa lebih dulu (no such table). Di adapter
-  // node:sqlite exec() sinkron, await tetap aman.
-  for (const stmt of SCHEMA_STATEMENTS) await DB.exec(stmt);
+  // Lewat prepare().run(), bukan exec(): exec() di D1 asli tidak mendukung
+  // SQL multi-baris (D1_EXEC_ERROR: incomplete input), sedangkan prepare()
+  // mem-parse statement utuh seperti semua query lain. Di adapter node:sqlite
+  // keduanya jalan, jadi satu jalur ini aman untuk dua-duanya.
+  for (const stmt of SCHEMA_STATEMENTS) await rawRun(stmt);
 }
 
 async function gate() {
