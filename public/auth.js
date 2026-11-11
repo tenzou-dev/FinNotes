@@ -1,6 +1,6 @@
 'use strict';
 
-import { initAuth, getSession, saveSession, apiJson, getSupa } from './api.js';
+import { initAuth, getSession, saveSession, apiJson, getConfig } from './api.js';
 
 const $ = (s) => document.querySelector(s);
 const form = $('#authForm');
@@ -21,8 +21,9 @@ function setMode(next) {
 
 document.querySelectorAll('.auth-tab').forEach((t) => (t.onclick = () => setMode(t.dataset.mode)));
 
+// alphabet kode undangan: A-Z tanpa O/I + 2-9 (tanpa 0/1)
 $('#fCode').addEventListener('input', (e) => {
-  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, '');
 });
 
 function fail(msg) {
@@ -32,23 +33,10 @@ function fail(msg) {
   btn.textContent = mode === 'login' ? 'Masuk' : 'Buat Akun';
 }
 
-/**
- * Simpan sesi hasil auth.
- *
- * Backend Supabase memakai bearer token yang disimpan di localStorage, supaya
- * cookie sesi dari server diabaikan. Backend lokal (SQLite) memakai cookie
- * sesi HTTP-only, jadi `token`-nya memang null dan tidak ada yang perlu disimpan.
- */
-function saveAuthSession(j, label) {
-  const token = j.access_token || j.token;
-  if (token) {
-    saveSession({ access_token: token, refresh_token: j.refresh_token, expires_at: j.expires_at });
-    return;
-  }
-  if (j.backend === 'supabase') {
-    throw new Error(`${label} berhasil tapi token tidak diterima`);
-  }
-  // backend lokal: cookie sesi sudah disetel server
+/** Semua mode sekarang bearer token; server selalu mengembalikan token. */
+function saveAuthSession(j) {
+  if (!j.token) throw new Error('Login berhasil tapi token tidak diterima');
+  saveSession({ token: j.token, expiresAt: j.expiresAt });
 }
 
 form.onsubmit = async (e) => {
@@ -67,21 +55,15 @@ form.onsubmit = async (e) => {
   };
 
   try {
-    // Signup & login selalu lewat server, baik di mode SQLite maupun Supabase.
-    // Di mode Supabase, Worker-lah yang membuat household (atau menggabungkan
-    // lewat kode undangan) lewat RPC. Kalau klien menDAFTAR langsung ke
-    // Supabase Auth, tidak ada household yang terbentuk dan user akan terjebak
-    // di aplikasi tanpa buku.
+    // Signup & login selalu lewat server: password di-hash dan kode
+    // undangan dicek di server SEBELUM akun dibuat (kode salah = 400).
     if (mode === 'login') {
       const j = await apiJson('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) });
-      saveAuthSession(j, 'Login');
+      saveAuthSession(j);
     } else {
       if (!payload.name) throw new Error('Nama belum diisi');
       const j = await apiJson('/api/auth/signup', { method: 'POST', body: JSON.stringify(payload) });
-      saveAuthSession(j, 'Signup');
-      // Akun sudah dibuat tapi kode undangan ditolak, jadi server membuat
-      // household cadangan. Beri tahu user, jangan dibiarkan diam-diam.
-      if (j.warning) sessionStorage.setItem('kj_signup_warning', j.warning);
+      saveAuthSession(j);
     }
     location.href = './';
   } catch (error) {
@@ -89,76 +71,78 @@ form.onsubmit = async (e) => {
   }
 };
 
-/* ---------------- Google OAuth ---------------- */
-
-const btnGoogle = $('#btnGoogle');
-const btnGoogleLabel = $('#btnGoogleLabel');
-
-function startGoogle() {
-  const supa = getSupa();
-  if (!supa) return fail('Login Google hanya tersedia di mode online');
-  btnGoogle.disabled = true;
-  btnGoogleLabel.textContent = 'Mengalihkan ke Google...';
-  const redirectTo = new URL('login.html', location.href).href;
-  location.href = supa.oauthUrl('google', redirectTo);
-}
+/* ---------------- Google Sign-In (GIS) ---------------- */
 
 /**
- * Deteksi balikan OAuth: Supabase mengarahkan kembali ke halaman ini dengan
- * token di URL hash (#access_token=...&refresh_token=...). Kirim token ke
- * Worker supaya profile + household dibuat server-side, lalu masuk app.
- * Return true kalau hash berisi hasil OAuth (sukses maupun error).
+ * Tombol "Lanjut dengan Google" dari Google Identity Services.
+ * Google menyerahkan credential (ID token JWT) langsung ke callback di
+ * browser; kita POST ke /api/auth/google supaya server yang memverifikasi
+ * tanda tangannya (JWKS) lalu membuat akun + sesi.
  */
-async function handleOAuthReturn() {
-  const p = new URLSearchParams(location.hash.slice(1));
-  const accessToken = p.get('access_token');
-  const oauthError = p.get('error_description') || p.get('error');
-  if (!accessToken && !oauthError) return false;
+async function initGoogle(config) {
+  const slot = $('#googleSlot');
+  if (!config.googleClientId) return; // belum dikonfigurasi -> tombol tetap hidden
 
-  history.replaceState(null, '', location.pathname + location.search);
-  if (!accessToken) {
-    fail(oauthError || 'Login Google dibatalkan');
-    return true;
-  }
-
-  btnGoogle.disabled = true;
-  btnGoogleLabel.textContent = 'Menyelesaikan login...';
-  const expiresIn = Number(p.get('expires_in') || 3600);
+  slot.hidden = false;
+  $('#authAlt').hidden = false;
   try {
-    const j = await apiJson('/api/auth/google', {
-      method: 'POST',
-      retry: false,
-      headers: { Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({
-        refresh_token: p.get('refresh_token'),
-        expires_at: Math.floor(Date.now() / 1000) + expiresIn,
-      }),
+    await new Promise((resolve, reject) => {
+      if (window.google?.accounts?.id) return resolve();
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true;
+      s.defer = true;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('gagal memuat'));
+      document.head.appendChild(s);
     });
-    saveAuthSession(j, 'Login Google');
-    location.href = './';
-  } catch (e) {
-    fail(e.message);
-    btnGoogle.disabled = false;
-    btnGoogleLabel.textContent = 'Lanjutkan dengan Google';
-  }
-  return true;
-}
+    const gsi = window.google?.accounts?.id;
+    if (!gsi) throw new Error('pustaka tidak tersedia');
 
-btnGoogle.onclick = startGoogle;
+    gsi.initialize({
+      client_id: config.googleClientId,
+      callback: async (resp) => {
+        try {
+          const j = await apiJson('/api/auth/google', {
+            method: 'POST',
+            body: JSON.stringify({ credential: resp.credential }),
+          });
+          saveAuthSession(j);
+          location.href = './';
+        } catch (e) {
+          fail(e.message);
+        }
+      },
+    });
+    // renderButton perlu container terlihat (clientWidth > 0) — slot
+    // sudah di-unhide di atas.
+    gsi.renderButton(slot, {
+      theme: 'outline',
+      size: 'large',
+      text: 'continue_with',
+      shape: 'pill',
+      locale: 'id',
+      width: Math.max(200, slot.clientWidth || 300),
+    });
+  } catch (e) {
+    fail('Login Google tidak bisa dimuat: ' + e.message);
+    slot.hidden = true;
+    $('#authAlt').hidden = true;
+  }
+}
 
 (async () => {
   try {
     const { config } = await initAuth();
     ready = true;
-    if (config.backend === 'supabase') {
-      $('#authHint').textContent = 'Akun & data disimpan di Supabase.';
-      btnGoogle.hidden = false;
-      $('#authAlt').hidden = false;
-    } else {
-      $('#authHint').textContent = 'Mode lokal (SQLite). Set SUPABASE_URL + SUPABASE_ANON_KEY untuk pindah ke Supabase.';
+    $('#authHint').textContent = config.local
+      ? 'Mode lokal — data tersimpan di file SQLite komputer ini.'
+      : 'Akun & data disimpan di Cloudflare D1.';
+    if (getSession()) {
+      location.href = './';
+      return;
     }
-    const oauthHandled = await handleOAuthReturn();
-    if (!oauthHandled && getSession()) location.href = './';
+    await initGoogle(config);
   } catch (e) {
     ready = true;
     $('#authHint').textContent = 'Gagal cek konfigurasi: ' + e.message;

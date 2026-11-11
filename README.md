@@ -14,29 +14,35 @@ Multi-user: dua akun (misalnya kamu dan partnermu) melihat **buku keuangan yang 
 
 ## Demo
 
-- **<https://finnotes.tenzou.dev>** — produksi, di-deploy otomatis dari repo ini
-  tiap ada push ke `main` (Cloudflare Workers Builds + Supabase)
+- **<https://finnotes.tenzou.dev>** — produksi: satu ekosistem Cloudflare
+  (Worker + D1), di-deploy otomatis dari repo ini tiap ada push ke `main`
 - <https://finnotes.tenzou-dev.workers.dev> — URL alternatif Worker yang sama
+
+URL produksi punya social preview (OG image, `public/img/og.png`) saat dibagikan
+ke chat/media sosial. Untuk preview repo di GitHub itu sendiri, upload gambar
+yang sama lewat **Settings → Social preview**.
 
 ## Fitur
 
 - Parser bahasa Indonesia tanpa API eksternal: `gaji 8jt`, `beli nasi 25rb sama kopi 15rb`
 - Multi-transaksi per pesan, format `1,2jt` dan `1.000.000` aman
 - Multi-user dengan satu household bersama, pendaftaran lewat **kode undangan**
-- Masuk dengan **akun Google** (OAuth), opsional - lihat bagian Google Sign-In
+- Masuk dengan **akun Google** (opsional) — cukup Client ID, tanpa client secret
 - Grafik: donat kategori, batang harian, perbandingan periode
 - Export CSV (transaksi dan rekap) plus backup JSON
 - Edit dan hapus transaksi dari UI
-- Row Level Security di Supabase: user hanya bisa melihat household sendiri
+- Data di **Cloudflare D1** (SQLite); produksi dan lokal memakai store & schema
+  yang sama persis, tinggal beda binding
 
 ## Kebutuhan
 
 - Node.js **>= 22.5** (memakai modul bawaan `node:sqlite`)
-- Supabase project (opsional, hanya untuk mode cloud)
+- Akun Cloudflare (untuk deploy: Worker + D1)
 
-## Menjalankan cepat (mode lokal, tanpa Supabase)
+## Menjalankan cepat (lokal)
 
-Tidak perlu konfigurasi apa pun. Otomatis memakai SQLite lokal.
+Tidak perlu konfigurasi apa pun. Otomatis memakai SQLite lokal
+(`data/finnotes.db`); schema di-apply sendiri saat server mulai.
 
 ```bash
 npm install
@@ -45,182 +51,115 @@ npm start
 
 Buka <http://localhost:3000>, lalu daftar akun pertama.
 
-## Setup Supabase (mode cloud)
+Konfigurasi lewat `.env` (salin dari `.env.example`; Node >= 20.12 memuatnya
+otomatis):
 
-### 1. Buat schema
-
-Supabase Dashboard -> **SQL Editor** -> New query -> salin seluruh isi
-[`supabase/schema.sql`](supabase/schema.sql) -> Run.
-
-Tabel yang dibuat:
-
-| Tabel | Isi |
-| --- | --- |
-| `households` | buku bersama, punya `join_code` |
-| `profiles` | nama dan email user, dibuat otomatis saat signup |
-| `household_members` | user ke household, role `owner` / `member` |
-| `transactions` | semua transaksi |
-| `messages` | riwayat chat |
-
-Plus RLS policy, trigger profile, dan dua RPC: `setup_my_household` serta
-`join_household`.
-
-> Eksekusi ulang script aman: semuanya memakai `if not exists` dan `or replace`.
-
-### 2. Isi environment variables
-
-Salin `.env.example` jadi `.env`, lalu isi:
-
-```
-SUPABASE_URL=https://xxxxx.supabase.co
-SUPABASE_ANON_KEY=eyJhbGciOi...
-```
-
-- Ambil **URL** dan **anon / publishable key** dari Dashboard -> Project Settings -> API
-- **Jangan pernah** memakai `service_role` key, key itu melewati RLS
-
-`.env` sudah masuk `.gitignore` dan dimuat otomatis saat start.
-
-### 3. Matikan konfirmasi email (WAJIB untuk app ini)
-
-Supabase Dashboard -> **Authentication** -> **Sign In / Providers** -> **Email**, matikan
-**Confirm email**.
-
-Kalau nyalakan, tiap signup mengirim email sungguhan dan kena **email rate limit** Supabase
-free tier (sekitar 2-4 signup per jam). Gejalanya user melihat
-`{"error":"email rate limit exceeded"}` dan tidak bisa daftar sama sekali.
-
-Verifikasi lewat Worker (butuh login):
-
-```bash
-curl -X POST https://finnotes.tenzou.dev/api/auth/signup \
-  -H "Content-Type: application/json" \
-  -d '{"email":"tes@gmail.com","password":"rahasia123456","name":"Tes","householdName":"Tes"}'
-```
-
-Kalau dapat `email rate limit exceeded`, opsi lain: naikkan **Email Rate Limit** di
-Authentication -> Sign In / Providers -> Email.
-
-### 4. Jalankan
-
-```bash
-npm start
-```
-
-### 5. Ajak orang lain
-
-1. Daftar akun pertama, isi nama buku, misalnya `Rumah`
-2. Menu **Anggota** di aplikasi -> salin **kode undangan**
-3. Orang kedua mendaftar dengan kode tersebut -> langsung masuk ke buku yang sama
-
-## Google Sign-In (opsional)
-
-Tombol **Lanjutkan dengan Google** otomatis muncul di halaman login saat
-backend Supabase dipakai. Supabase perlu dikonfigurasi sekali:
-
-### 1. Google Cloud Console
-
-1. Buka <https://console.cloud.google.com/apis/credentials> (buat / pilih project).
-2. **OAuth consent screen**: External, isi nama app + email support, lalu
-   **Publish app** supaya bisa dipakai siapa pun (scope yang diminta hanya
-   `openid email profile`, tidak perlu proses verifikasi Google).
-3. **Create Credentials -> OAuth client ID -> Web application**:
-   - Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`
-   - Simpan **Client ID** dan **Client Secret**.
-
-### 2. Supabase Dashboard
-
-1. **Authentication -> Sign In / Providers -> Google**: aktifkan, tempel
-   Client ID + Client Secret.
-2. **Authentication -> URL Configuration**:
-   - Site URL: domain produksi, misalnya `https://finnotes.tenzou.dev`
-   - Redirect URLs: tambahkan `https://<domain-produksi>/**` dan
-     `http://localhost:3000/**` (untuk development).
-
-### 3. Jalankan ulang schema
-
-Jalankan ulang [`supabase/schema.sql`](supabase/schema.sql) di SQL Editor.
-Trigger `handle_new_user` versi baru ikut menyimpan nama Google
-(`full_name` di metadata) sebagai nama user, bukan hanya prefix email.
-
-Alur sign-in-nya: tombol Google -> consent Google -> kembali ke
-`login.html` membawa token di URL hash -> frontend mengirim token ke
-`POST /api/auth/google` -> Worker memverifikasi dan menyiapkan profile +
-household, sama seperti signup email/password. User Google dengan email yang
-sudah terdaftar otomatis tersambung ke akun lama.
+| Variabel | Default | Keterangan |
+| --- | --- | --- |
+| `SQLITE_FILE` | `data/finnotes.db` | file DB lokal; `:memory:` untuk test |
+| `PBKDF2_ITERATIONS` | `10000` | iterasi hash password |
+| `GOOGLE_CLIENT_ID` | - | mengaktifkan tombol Google (opsional) |
+| `PORT` | `3000` | port HTTP |
 
 ## Testing
 
 ```bash
-npm test          # parser + splitter
-npm run test:all  # tambah e2e (butuh server jalan)
+npm test             # parser + splitter (81 test)
+npm run test:all     # + e2e server lokal (61 test)
+npm run test:worker  # e2e Worker + store D1 (112 test)
+npm run check:worker # pastikan bundle Worker bersih dari API Node
 ```
 
-E2E membutuhkan server aktif:
+E2E lokal menjalankan `server.js` sendiri dengan DB `:memory:` — tidak perlu
+server terpisah. Yang diuji: signup, dua user satu household, isolasi antar
+household, chat multi-transaksi, analytics semua periode, export, edit, hapus,
+login/logout, dan verifikasi ID token Google (RS256/ES256, termasuk rotasi
+kunci JWKS).
+
+## Deploy ke Cloudflare Workers + D1
+
+1. **Buat database D1**: dashboard Cloudflare → **Storage & Databases → D1 →
+   Create database**, beri nama `finnotes`, salin **Database ID**.
+2. **Isi `deploy/wrangler.toml`**: ganti `database_id` dengan ID tadi. Tidak ada
+   migrasi manual — schema di-apply sendiri oleh Worker saat request pertama
+   (idempotent, aman diulang).
+3. (Opsional) isi `GOOGLE_CLIENT_ID` di `[vars]` — lihat bagian Google Sign-In.
+4. Deploy:
 
 ```bash
-$env:PORT=3312; node server.js
-node test/e2e.test.js
-```
-
-Yang diuji: signup, dua user satu household, isolasi antar household, chat
-multi-transaksi, analytics semua periode, export, edit, hapus, dan login ulang.
-
-Suite Worker (mock Supabase, tanpa jaringan):
-
-```bash
-npm run test:worker  # 99 test
-npm run check:worker # pastikan bundle tidak pull API Node
-```
-
-## Deploy ke Cloudflare Workers
-
-```bash
-# 1. isi SUPABASE_URL di deploy/wrangler.toml
-# 2. install dependency deploy
 npm --prefix deploy ci
-
-# 3. pasang anon key sebagai secret
-npm --prefix deploy exec -- wrangler secret put SUPABASE_ANON_KEY
-
-# 4. deploy
 npm --prefix deploy run deploy
 ```
 
-Instruksi lengkap: `deploy/README.md`.
+**Custom domain**: Worker Settings → Domains & Routes → Add → Custom Domain
+(misalnya `finnotes.tenzou.dev`); DNS record dan sertifikat dibuat otomatis
+Cloudflare.
 
-## Konfigurasi
+**Auto-deploy dari GitHub**: hubungkan repo ke Workers Builds (dashboard Worker
+→ Settings → Builds). Setiap push ke `main` men-deploy otomatis.
 
-| Variabel | Default | Keterangan |
-| --- | --- | --- |
-| `SUPABASE_URL` | - | URL project Supabase |
-| `SUPABASE_ANON_KEY` | - | anon / publishable key |
-| `STORE_BACKEND` | auto | `supabase` atau `sqlite` untuk memaksa |
-| `PORT` | `3000` | port HTTP |
+Instruksi lengkap: [`deploy/README.md`](deploy/README.md).
 
-Kalau `SUPABASE_URL` dan `SUPABASE_ANON_KEY` kosong, backend otomatis jatuh ke
-SQLite lokal.
+## Google Sign-In (opsional)
+
+Tombol **Lanjutkan dengan Google** muncul sendiri di halaman login begitu
+`GOOGLE_CLIENT_ID` terisi. Client ID OAuth bersifat publik (muncul di halaman
+login), jadi tidak perlu disimpan sebagai secret.
+
+### 1. Google Cloud Console
+
+1. Buka <https://console.cloud.google.com/apis/credentials> (buat / pilih
+   project).
+2. **OAuth consent screen**: External, isi nama app + email support, lalu
+   **Publish app** supaya bisa dipakai siapa pun (scope hanya
+   `openid email profile`, tidak butuh verifikasi Google).
+3. **Create Credentials → OAuth client ID → Web application**:
+   - Authorized JavaScript origins: `https://<domain-produksi>` **dan**
+     `http://localhost:3000` (untuk development)
+   - Simpan **Client ID** (client secret tidak dipakai).
+
+### 2. Pasang Client ID
+
+- Produksi: isi `GOOGLE_CLIENT_ID` di `[vars]` pada `deploy/wrangler.toml`
+- Lokal: isi di `.env` (server Express) atau `deploy/.dev.vars` (`wrangler dev`)
+
+### 3. Alurnya
+
+Tombol GIS (Google Identity Services) → Google menyerahkan credential (ID token
+JWT) langsung ke browser → frontend `POST /api/auth/google` → **server**
+memverifikasi tanda tangan lewat JWKS Google (RS256/ES256) beserta klaim
+`iss`/`aud`/`exp`/`email_verified` → akun, household, dan sesi dibuat
+server-side. Email Google yang sudah terdaftar otomatis tersambung ke akun
+lama (password tetap jalan).
 
 ## Struktur
 
 ```
-server.js               Express: auth, chat, state, analytics, export
+server.js               Express: auth, chat, state, analytics, export (lokal)
 src/parser.js           parse satu transaksi dari teks
 src/splitter.js         pecah satu pesan jadi banyak transaksi
 src/assistant.js        command dan orkestrasi chat
 src/analytics.js        agregasi kategori, harian, perbandingan
 src/csv.js              export CSV
-src/store/index.js      pilih backend, kontrak argumen seragam
-src/store/sqlite.js     implementasi lokal (node:sqlite)
-src/store/supabase.js   implementasi cloud (PostgREST + Supabase Auth)
+src/oidc.js             verifikasi ID token Google (JWKS, WebCrypto)
+src/store/d1.js         store tunggal untuk Worker & server lokal
+src/store/schema.js     schema DDL (self-apply, idempotent)
+src/store/node-d1.js    adapter node:sqlite → antarmuka D1 (khusus Node)
+src/store/index.js      entry store untuk server lokal
 public/                 UI tanpa framework
-supabase/schema.sql     schema, RLS, RPC
+deploy/                 Worker Cloudflare (worker.js, wrangler.toml, test)
 test/                   parser, splitter, e2e
 ```
 
 ## Catatan keamanan
 
-- Semua query ke Supabase memakai token user, tidak ada `service_role`
-- RLS menjaga user hanya bisa mengakses household yang dia menjadi anggota
-- Cookie fallback SQLite **tidak ditandatangani**, mode itu hanya untuk pengembangan
+- Password di-hash **PBKDF2-SHA256** (default 10.000 iterasi ≈ 3,5 ms CPU
+  Workers free plan). Jumlah iterasi ikut tersimpan di tiap hash, jadi default
+  bisa dinaikkan kapan saja tanpa memutus user lama
+- Sesi = bearer token acak, TTL 30 hari, tanpa refresh token; **logout
+  menghapus baris sesi di server** sehingga token langsung mati
+- Isolasi antar household ditegakkan di setiap query (cek membership) — tidak
+  ada `service_role` atau layanan pihak ketiga
+- ID token Google diverifikasi penuh di server sebelum dipercaya; klien tidak
+  pernah menulis data sendiri
 - Gunakan password yang kuat, minimal 6 karakter

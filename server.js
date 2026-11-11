@@ -2,10 +2,9 @@
 
 const path = require('node:path');
 const express = require('express');
-const cookieParser = require('cookie-parser');
 
 const store = require('./src/store');
-const session = require('./src/session');
+const oidc = require('./src/oidc');
 const analytics = require('./src/analytics');
 const csv = require('./src/csv');
 const { handleMessage, confirmType, formatDate, humanDate, txCard } = require('./src/assistant');
@@ -16,16 +15,13 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '256kb' }));
-app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 app.get('/api/config', (req, res) => {
   res.json({
     backend: store.BACKEND,
-    supabase: {
-      url: process.env.SUPABASE_URL || null,
-      anonKey: process.env.SUPABASE_ANON_KEY || null,
-    },
+    local: true,
+    googleClientId: process.env.GOOGLE_CLIENT_ID || null,
   });
 });
 
@@ -33,34 +29,18 @@ app.get('/api/config', (req, res) => {
 
 function tokenFrom(req) {
   const h = req.get('authorization');
-  if (h && h.startsWith('Bearer ')) return h.slice(7);
-  return req.cookies?.kj_token || null;
+  return h && h.startsWith('Bearer ') ? h.slice(7) : null;
 }
 
-async function attachUser(req, res, next) {
+async function attachUser(req, _res, next) {
   const token = tokenFrom(req);
+  if (!token) return next();
   try {
-    if (store.BACKEND === 'supabase') {
-      if (!token) return next();
-      const s = await store.getSession(token);
-      if (s) {
-        req.authToken = token;
-        req.user = s.user;
-        req.households = s.households;
-      }
-    } else {
-      const raw = session.readSession(req);
-      if (raw) {
-        const households = await store.listHouseholds(null, raw.u);
-        if (households.length) {
-          const memberships = await Promise.all(
-            households.map((h) => store.getMembership(null, raw.u, h.id).catch(() => null))
-          );
-          req.households = households.map((h, i) => ({ ...h, role: memberships[i]?.role || 'member' }));
-          req.householdId = raw.h && households.some((h) => h.id === raw.h) ? raw.h : households[0].id;
-          req.user = await store.getUserById(null, raw.u);
-        }
-      }
+    const s = await store.getSession(token);
+    if (s) {
+      req.authToken = token;
+      req.user = s.user;
+      req.households = s.households || [];
     }
   } catch (e) {
     console.error('auth error', e.message);
@@ -96,85 +76,48 @@ function ctxOf(req) {
   };
 }
 
-app.post('/api/auth/signup', attachUser, async (req, res) => {
+/**
+ * Signup + household dalam SATU transaksi logis store: kalau kode undangan
+ * salah, akun tidak jadi dibuat (400) — beda dengan era Supabase yang tidak
+ * bisa di-rollback. Response: { user, household, token, expiresAt }.
+ */
+app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, name, householdName, joinCode } = req.body || {};
     const r = await store.signUp({ email, password, name, householdName, joinCode });
-    let token = null;
-    let household = r.household;
-    let warning = null;
-    if (store.BACKEND === 'supabase') {
-      token = r.access_token || r.session?.access_token;
-      if (!token) throw new Error('Signup berhasil tapi token tidak diterima');
-      const clean = String(joinCode || '').trim();
-      if (clean) {
-        try {
-          household = await store.joinHousehold(token, clean);
-        } catch (joinErr) {
-          // akun sudah dibuat, jadi jangan tinggalkan user tanpa household
-          household = await store.createHousehold(token, householdName || 'Rumah Tangga');
-          warning = joinErr.message;
-        }
-      } else {
-        household = await store.createHousehold(token, householdName || 'Rumah Tangga');
-      }
-    } else {
-      await session.createSession(res, r.user);
-    }
-    res.json({ user: r.user || r.session?.user, household, token, warning, backend: store.BACKEND });
+    res.json({ ...r, backend: store.BACKEND });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
 
-app.post('/api/auth/login', attachUser, async (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body || {};
-    const r = await store.signIn({ email, password });
-    let token = null;
-    if (store.BACKEND === 'supabase') {
-      token = r.access_token || r.session?.access_token;
-    } else {
-      await session.createSession(res, r.user);
-    }
-    const households = await store.listHouseholds(token, r.user.id);
-    res.json({ user: r.user || r.session?.user, households, token, backend: store.BACKEND });
+    const r = await store.signIn({ email: req.body?.email, password: req.body?.password });
+    res.json({ ...r, backend: store.BACKEND });
   } catch (e) {
     res.status(401).json({ error: e.message });
   }
 });
 
-app.post('/api/auth/logout', (req, res) => {
-  session.clearSession(res);
+/** Logout = hapus baris sesi di DB; token langsung mati. */
+app.post('/api/auth/logout', async (req, res) => {
+  await store.logout(tokenFrom(req));
   res.json({ ok: true });
 });
 
 /**
- * Melengkapi login Google OAuth (backend Supabase). Browser dialihkan ke
- * {SUPABASE_URL}/auth/v1/authorize?provider=google lalu kembali ke login.html
- * dengan access_token di hash; frontend mengirim token itu ke endpoint ini.
- * Worker/server memverifikasi token dan menyiapkan profile + household
- * (setup_my_household idempotent) - klien tetap tidak menulis langsung.
+ * Login "Lanjut dengan Google" (GIS): frontend mengirim credential (ID token
+ * JWT) dari tombol Google; server memverifikasi tanda tangan + klaim lewat
+ * JWKS Google, lalu membuat/menghubungkan akun + household.
  */
-app.post('/api/auth/google', attachUser, async (req, res) => {
-  if (store.BACKEND !== 'supabase') {
-    return res.status(400).json({ error: 'Login Google hanya tersedia di mode Supabase' });
-  }
-  const token = tokenFrom(req);
-  if (!token) return res.status(401).json({ error: 'Token Google tidak diterima' });
-  if (!req.user) return res.status(401).json({ error: 'Sesi Google tidak valid, silakan coba lagi' });
+app.post('/api/auth/google', async (req, res) => {
   try {
-    const household = await store.createHousehold(token, req.body?.householdName || 'Rumah Tangga');
-    res.json({
-      user: req.user,
-      household,
-      households: req.households?.length ? req.households : [household],
-      token,
-      access_token: token,
-      refresh_token: req.body?.refresh_token || null,
-      expires_at: req.body?.expires_at || Math.floor(Date.now() / 1000) + 3600,
-      backend: store.BACKEND,
-    });
+    const clientId = process.env.GOOGLE_CLIENT_ID || '';
+    const credential = String(req.body?.credential || '').trim();
+    const profile = await oidc.verifyGoogleIdToken(credential, clientId);
+    const r = await store.signInWithGoogle(profile);
+    res.json({ ...r, backend: store.BACKEND });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -322,8 +265,8 @@ app.use((err, req, res, _next) => {
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`\n  FinNotes v0.2  ->  http://localhost:${PORT}`);
-    console.log(`  backend: ${store.BACKEND}\n`);
+    console.log(`\n  FinNotes v0.3  ->  http://localhost:${PORT}`);
+    console.log(`  backend: ${store.BACKEND} (SQLITE_FILE lokal)\n`);
   });
 }
 

@@ -19,12 +19,11 @@ const ALLOWED_NODE_BUILTINS = new Set([
   'node:process', 'node:events', 'node:stream', 'node:perf_hooks', 'node:tty',
 ]);
 
-// Modul lokal yang TIDAK boleh ikut ter-bundle.
+// Modul lokal yang TIDAK boleh ikut ter-bundle (khusus runtime Node:
+// fs/path untuk file DB dan node:sqlite sebagai adapter D1 lokal).
 const BLOCKED_LOCAL = new Set([
-  path.join(ROOT, 'src', 'store', 'sqlite.js'),
   path.join(ROOT, 'src', 'store', 'index.js'),
-  path.join(ROOT, 'src', 'config.js'),
-  path.join(ROOT, 'src', 'session.js'),
+  path.join(ROOT, 'src', 'store', 'node-d1.js'),
 ]);
 
 const problems = [];

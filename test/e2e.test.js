@@ -1,6 +1,20 @@
 'use strict';
 
-const BASE = process.env.BASE || 'http://localhost:3312';
+/**
+ * E2E server lokal (Express + store D1 di atas node:sqlite).
+ *
+ * Menjalankan server.js sebagai proses anak dengan SQLITE_FILE=':memory:'
+ * (selalu mulai kosong), menunggu /api/config siap, lalu menguji seluruh
+ * alur lewat Bearer token — persis seperti frontend memakai API.
+ *
+ * Jalankan: node test/e2e.test.js  (atau npm run test:all)
+ */
+
+const { spawn } = require('node:child_process');
+const nodePath = require('node:path');
+
+const PORT = Number(process.env.PORT) || 3312;
+const BASE = process.env.BASE || `http://localhost:${PORT}`;
 const stamp = Date.now();
 
 let pass = 0, fail = 0;
@@ -10,76 +24,113 @@ const ok = (name, cond, detail) => {
   else { fail++; failures.push(`${name}${detail ? ' :: ' + detail : ''}`); }
 };
 
-const jar = () => ({ cookie: '' });
+/* ---------------- server anak ---------------- */
 
-function cookieHeader(jar) { return jar.cookie ? { cookie: jar.cookie } : {}; }
+let serverLog = '';
+let serverDied = '';
 
-function absorb(jar, res) {
-  const set = res.headers.getSetCookie?.() || [];
-  for (const c of set) jar.cookie = c.split(';')[0];
+const proc = spawn(process.execPath, [nodePath.join(__dirname, '..', 'server.js')], {
+  env: {
+    ...process.env,
+    SQLITE_FILE: ':memory:',
+    PORT: String(PORT),
+    PBKDF2_ITERATIONS: '1000', // cepat untuk test; produksi 10000
+    GOOGLE_CLIENT_ID: 'test-google-client.apps.googleusercontent.com',
+  },
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+proc.stdout.on('data', (d) => (serverLog += d));
+proc.stderr.on('data', (d) => (serverLog += d));
+proc.on('exit', (code) => { serverDied = `server exit ${code}`; });
+
+async function waitReady() {
+  const t0 = Date.now();
+  while (Date.now() - t0 < 20000) {
+    if (serverDied) throw new Error(`${serverDied}. Log:\n${serverLog}`);
+    try {
+      const r = await fetch(BASE + '/api/config');
+      if (r.ok) return await r.json();
+    } catch { /* belum siap */ }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw new Error('server tidak siap dalam 20 dtk. Log:\n' + serverLog);
 }
 
-async function call(jar, method, path, body) {
+/* ---------------- klien ---------------- */
+
+async function call(token, method, path, body) {
   const res = await fetch(BASE + path, {
     method,
-    headers: { 'Content-Type': 'application/json', ...cookieHeader(jar) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  absorb(jar, res);
   const ct = res.headers.get('content-type') || '';
   const data = ct.includes('json') ? await res.json() : await res.text();
   return { status: res.status, data, headers: res.headers };
 }
 
-const chat = (jar, text) => call(jar, 'POST', '/api/chat', { text });
-const state = (jar) => call(jar, 'GET', '/api/state');
-const me = (jar) => call(jar, 'GET', '/api/auth/me');
+const chat = (t, text) => call(t, 'POST', '/api/chat', { text });
+const state = (t) => call(t, 'GET', '/api/state');
+const me = (t) => call(t, 'GET', '/api/auth/me');
 
 (async () => {
+  const config = await waitReady();
+  ok('server siap, backend d1', config.backend === 'd1', JSON.stringify(config));
+  ok('config local true', config.local === true, JSON.stringify(config));
+  ok('config googleClientId', !!config.googleClientId, JSON.stringify(config));
+
   /* ---------- auth gate ---------- */
-  const anon = jar();
-  const gated = await state(anon);
+  const gated = await state(null);
   ok('api butuh login', gated.status === 401, `status ${gated.status}`);
-  const gatedChat = await chat(anon, 'gaji 1jt');
+  const gatedChat = await chat(null, 'gaji 1jt');
   ok('chat tanpa login ditolak', gatedChat.status === 401, `status ${gatedChat.status}`);
 
   /* ---------- signup owner ---------- */
-  const andi = jar();
   const emailA = `andi${stamp}@test.com`;
-  const su = await call(andi, 'POST', '/api/auth/signup', { email: emailA, password: 'rahasia123', name: 'Andi', householdName: 'Rumah Andi' });
-  ok('signup berhasil', su.status === 200 && !!su.data.user, JSON.stringify(su.data));
+  const su = await call(null, 'POST', '/api/auth/signup', { email: emailA, password: 'rahasia123', name: 'Andi', householdName: 'Rumah Andi' });
+  ok('signup berhasil', su.status === 200 && !!su.data.user, JSON.stringify(su.data).slice(0, 160));
+  ok('signup memberi token', !!su.data.token, JSON.stringify(su.data).slice(0, 160));
   ok('household dibuat', !!su.data.household?.id && !!su.data.household?.join_code, JSON.stringify(su.data.household));
+  ok('join_code format A-Z2-9', /^[A-Z2-9]{6}$/.test(su.data.household?.join_code || ''), su.data.household?.join_code);
+  let tA = su.data.token;
   const houseId = su.data.household.id;
   const joinCode = su.data.household.join_code;
 
-  const dup = await call(jar(), 'POST', '/api/auth/signup', { email: emailA, password: 'rahasia123', name: 'Duplikat' });
+  const dup = await call(null, 'POST', '/api/auth/signup', { email: emailA, password: 'rahasia123', name: 'Duplikat' });
   ok('email duplikat ditolak', dup.status === 400 && /sudah terdaftar/.test(dup.data.error), JSON.stringify(dup.data));
 
-  const weak = await call(jar(), 'POST', '/api/auth/signup', { email: `x${stamp}@t.com`, password: '123', name: 'X' });
+  const weak = await call(null, 'POST', '/api/auth/signup', { email: `x${stamp}@t.com`, password: '123', name: 'X' });
   ok('password lemah ditolak', weak.status === 400 && /minimal 6/.test(weak.data.error), JSON.stringify(weak.data));
 
-  const m1 = await me(andi);
+  const m1 = await me(tA);
   ok('me mengembalikan user', m1.data.user?.email === emailA, JSON.stringify(m1.data));
   ok('me punya household', m1.data.households?.length === 1);
+  ok('pembuat berperan owner', m1.data.households?.[0]?.role === 'owner', m1.data.households?.[0]?.role);
 
   /* ---------- signup istri dengan join code ---------- */
-  const siti = jar();
   const emailB = `siti${stamp}@test.com`;
-  const su2 = await call(siti, 'POST', '/api/auth/signup', { email: emailB, password: 'rahasia123', name: 'Siti', joinCode });
-  ok('istri gabung via kode', su2.status === 200, JSON.stringify(su2.data));
+  const su2 = await call(null, 'POST', '/api/auth/signup', { email: emailB, password: 'rahasia123', name: 'Siti', joinCode });
+  ok('istri gabung via kode', su2.status === 200, JSON.stringify(su2.data).slice(0, 160));
   ok('punya household yang sama', su2.data.household?.id === houseId, `${su2.data.household?.id} vs ${houseId}`);
+  const tB = su2.data.token;
+  ok('yang gabung berperan member', (await me(tB)).data.households?.[0]?.role === 'member');
 
-  const badCode = await call(jar(), 'POST', '/api/auth/signup', { email: `y${stamp}@t.com`, password: 'rahasia123', name: 'Y', joinCode: 'ZZZZZZ' });
+  const badCode = await call(null, 'POST', '/api/auth/signup', { email: `y${stamp}@t.com`, password: 'rahasia123', name: 'Y', joinCode: 'ZZZZZZ' });
   ok('kode salah ditolak', badCode.status === 400 && /tidak ditemukan/.test(badCode.data.error), JSON.stringify(badCode.data));
+  const badCodeLogin = await call(null, 'POST', '/api/auth/login', { email: `y${stamp}@t.com`, password: 'rahasia123' });
+  ok('kode salah tidak membuat akun', badCodeLogin.status === 401, `status ${badCodeLogin.status}`);
 
   /* ---------- data bersama ---------- */
-  await chat(andi, 'gaji 8jt');
-  await chat(andi, 'bayar cicilan 1,2jt');
-  await chat(siti, 'beli groceries 450rb');
-  await chat(siti, 'jualan kue 300rb');
+  await chat(tA, 'gaji 8jt');
+  await chat(tA, 'bayar cicilan 1,2jt');
+  await chat(tB, 'beli groceries 450rb');
+  await chat(tB, 'jualan kue 300rb');
 
-  const sA = await state(andi);
-  const sB = await state(siti);
+  const sA = await state(tA);
+  const sB = await state(tB);
   ok('andi lihat 4 transaksi', sA.data.transactions.length === 4, `${sA.data.transactions.length}`);
   ok('siti lihat 4 transaksi (shared)', sB.data.transactions.length === 4, `${sB.data.transactions.length}`);
   ok('total sama', sA.data.totals.balance === sB.data.totals.balance, `${sA.data.totals.balance} vs ${sB.data.totals.balance}`);
@@ -90,14 +141,14 @@ const me = (jar) => call(jar, 'GET', '/api/auth/me');
   ok('penulis transaksi berbeda', authors.size === 2, [...authors].join(','));
 
   /* ---------- multi transaksi ---------- */
-  const before = (await state(andi)).data.transactions.length;
-  const multi = await chat(andi, 'beli nasi 25rb sama kopi 15rb sama teh 8k');
+  const before = (await state(tA)).data.transactions.length;
+  const multi = await chat(tA, 'beli nasi 25rb sama kopi 15rb sama teh 8k');
   ok('chat multi dicatat', multi.data.transactions?.length === 3, JSON.stringify(multi.data.transactions?.map((t) => t.amount)));
-  ok('tambah 3 transaksi', (await state(andi)).data.transactions.length === before + 3);
+  ok('tambah 3 transaksi', (await state(tA)).data.transactions.length === before + 3);
   ok('jumlah multi = 48rb', multi.data.transactions?.reduce((a, t) => a + t.amount, 0) === 48000);
 
   /* ---------- analytics ---------- */
-  const an = await call(andi, 'GET', '/api/analytics?period=month');
+  const an = await call(tA, 'GET', '/api/analytics?period=month');
   ok('analytics ok', an.status === 200, JSON.stringify(an.data).slice(0, 120));
   ok('punya kategori pengeluaran', an.data.expenseByCategory?.length > 0);
   ok('punya seri harian', Array.isArray(an.data.series));
@@ -105,11 +156,11 @@ const me = (jar) => call(jar, 'GET', '/api/auth/me');
   ok('punya 2 anggota', an.data.members?.length === 2, JSON.stringify(an.data.members?.map((m) => m.name)));
   ok('ada perbandingan periode', typeof an.data.comparison?.expense === 'number');
 
-  const anAll = await call(andi, 'GET', '/api/analytics?period=all');
+  const anAll = await call(tA, 'GET', '/api/analytics?period=all');
   ok('analytics all ok', anAll.status === 200 && anAll.data.summary.count > 0);
 
   /* ---------- export ---------- */
-  const csvTxRaw = await fetch(BASE + '/api/export/transactions.csv', { headers: cookieHeader(andi) });
+  const csvTxRaw = await fetch(BASE + '/api/export/transactions.csv', { headers: { Authorization: `Bearer ${tA}` } });
   const csvBuf = Buffer.from(await csvTxRaw.arrayBuffer());
   ok('export transaksi 200', csvTxRaw.status === 200);
   const csvTxt = csvBuf.toString('utf8');
@@ -117,14 +168,14 @@ const me = (jar) => call(jar, 'GET', '/api/auth/me');
   ok('export punya BOM', csvBuf[0] === 0xef && csvBuf[1] === 0xbb && csvBuf[2] === 0xbf);
   ok('export filename', /attachment; filename="transaksi-/.test(csvTxRaw.headers.get('content-disposition') || ''));
 
-  const csvSum = await call(andi, 'GET', '/api/export/summary.csv?period=month');
+  const csvSum = await call(tA, 'GET', '/api/export/summary.csv?period=month');
   ok('export rekap 200', csvSum.status === 200 && String(csvSum.data).includes('Rekap Keuangan'));
 
-  const json = await call(andi, 'GET', '/api/export/json');
+  const json = await call(tA, 'GET', '/api/export/json');
   ok('export json 200', json.status === 200 && Array.isArray(json.data.transactions));
 
   /* ---------- edit & hapus ---------- */
-  const newest = (await state(andi)).data;
+  const newest = (await state(tA)).data;
   const target = newest.transactions[0];
   const beforePatch = newest.totals;
   const wasExpense = target.type === 'expense';
@@ -134,7 +185,7 @@ const me = (jar) => call(jar, 'GET', '/api/auth/me');
     ? beforePatch.balance + target.amount
     : beforePatch.balance - target.amount;
 
-  const patched = await call(andi, 'PATCH', `/api/transactions/${target.id}`, { category: 'Gaji', note: 'revisi', amount: 9000000 });
+  const patched = await call(tA, 'PATCH', `/api/transactions/${target.id}`, { category: 'Gaji', note: 'revisi', amount: 9000000 });
   ok('patch ok', patched.status === 200 && patched.data.transaction.note === 'revisi', JSON.stringify(patched.data));
   ok('patch nominal', patched.data.transaction.amount === 9000000, String(patched.data.transaction?.amount));
 
@@ -144,53 +195,60 @@ const me = (jar) => call(jar, 'GET', '/api/auth/me');
   ok('patch update saldo', patched.data.totals.balance === expectedAfterPatch,
     `${beforePatch.balance} -> ${patched.data.totals.balance}, mau ${expectedAfterPatch}`);
 
-  const badPatch = await call(andi, 'PATCH', `/api/transactions/${target.id}`, { type: 'hacked' });
+  const badPatch = await call(tA, 'PATCH', `/api/transactions/${target.id}`, { type: 'hacked' });
   ok('patch type ilegal diabaikan', badPatch.status === 200 && badPatch.data.transaction.type === target.type, JSON.stringify(badPatch.data));
 
-  const badDate = await call(andi, 'PATCH', `/api/transactions/${target.id}`, { date: 'bukan-tanggal' });
+  const badDate = await call(tA, 'PATCH', `/api/transactions/${target.id}`, { date: 'bukan-tanggal' });
   ok('patch tanggal ilegal diabaikan', badDate.status === 200 && badDate.data.transaction.date === target.date);
 
-  const del = await call(andi, 'DELETE', `/api/transactions/${target.id}`);
+  const del = await call(tA, 'DELETE', `/api/transactions/${target.id}`);
   ok('hapus ok', del.status === 200 && del.data.ok === true);
   ok('hapus kembalikan saldo tanpa baris itu', del.data.totals.balance === afterDelete, `${del.data.totals.balance} vs ${afterDelete}`);
   ok('hapus kurangi jumlah transaksi', del.data.totals.count === beforePatch.count - 1);
 
-  const notFound = await call(andi, 'DELETE', '/api/transactions/tidak-ada');
+  const notFound = await call(tA, 'DELETE', '/api/transactions/tidak-ada');
   ok('hapus id salah -> 404', notFound.status === 404, `status ${notFound.status}`);
 
   /* ---------- isolasi antar household ---------- */
-  const stranger = jar();
-  const su3 = await call(stranger, 'POST', '/api/auth/signup', { email: `stranger${stamp}@t.com`, password: 'rahasia123', name: 'Stranger', householdName: 'Buku Sendiri' });
+  const su3 = await call(null, 'POST', '/api/auth/signup', { email: `stranger${stamp}@t.com`, password: 'rahasia123', name: 'Stranger', householdName: 'Buku Sendiri' });
   ok('user baru punya household sendiri', su3.data.household?.id !== houseId);
-  const sC = await state(stranger);
+  const tS = su3.data.token;
+  const sC = await state(tS);
   ok('tidak lihat data orang lain', sC.data.transactions.length === 0, `${sC.data.transactions.length}`);
-  const crossDelete = await call(stranger, 'DELETE', `/api/transactions/${sA.data.transactions[0].id}`);
+  const crossDelete = await call(tS, 'DELETE', `/api/transactions/${sA.data.transactions[0].id}`);
   ok('tidak bisa hapus milik orang lain', crossDelete.status === 404 || crossDelete.status === 403, `status ${crossDelete.status}`);
 
-  /* ---------- login ---------- */
-  const logout = await call(andi, 'POST', '/api/auth/logout');
+  /* ---------- logout & login ulang ---------- */
+  const logout = await call(tA, 'POST', '/api/auth/logout');
   ok('logout ok', logout.status === 200);
-  const afterLogout = await state(andi);
+  const afterLogout = await state(tA);
   ok('setelah logout tidak bisa akses', afterLogout.status === 401, `status ${afterLogout.status}`);
 
-  const relogin = jar();
-  const li = await call(relogin, 'POST', '/api/auth/login', { email: emailA, password: 'rahasia123' });
-  ok('login ulang berhasil', li.status === 200 && li.data.user?.email === emailA);
-  ok('data kembali ada setelah login', (await state(relogin)).data.transactions.length > 0);
+  const li = await call(null, 'POST', '/api/auth/login', { email: emailA, password: 'rahasia123' });
+  ok('login ulang berhasil', li.status === 200 && li.data.user?.email === emailA, JSON.stringify(li.data).slice(0, 120));
+  tA = li.data.token;
+  ok('data kembali ada setelah login', (await state(tA)).data.transactions.length > 0);
 
-  const wrongPass = await call(jar(), 'POST', '/api/auth/login', { email: emailA, password: 'salahpassword' });
+  const wrongPass = await call(null, 'POST', '/api/auth/login', { email: emailA, password: 'salahpassword' });
   ok('password salah ditolak', wrongPass.status === 401, `status ${wrongPass.status}`);
 
-  // endpoint google hanya relevan untuk backend supabase; di mode sqlite
-  // harus menolak dengan pesan jelas, bukan crash
-  const google = await call(jar(), 'POST', '/api/auth/google', {});
-  ok('google di mode sqlite -> 400 pesan jelas', google.status === 400 && /supabase/i.test(google.data.error || ''), JSON.stringify(google.data));
+  // endpoint google: tanpa credential ditolak 400 sebelum menyentuh jaringan
+  const google = await call(null, 'POST', '/api/auth/google', {});
+  ok('google tanpa credential -> 400 pesan jelas', google.status === 400 && /tidak diterima/.test(google.data.error || ''), JSON.stringify(google.data));
+  const googleBad = await call(null, 'POST', '/api/auth/google', { credential: 'bukan-jwt' });
+  ok('google token ngawur -> 400', googleBad.status === 400 && /tidak valid/.test(googleBad.data.error || ''), JSON.stringify(googleBad.data));
 
-  const sFinal = await state(relogin);
+  const sFinal = await state(tA);
   ok('saldo konsisten setelah login ulang', sFinal.data.totals.balance === afterDelete, JSON.stringify(sFinal.data.totals));
   ok('jumlah transaksi tetap', sFinal.data.totals.count === beforePatch.count - 1, `${sFinal.data.totals.count} vs ${beforePatch.count - 1}`);
 
   console.log(fail ? 'FAILURES:\n' + failures.map((f) => '  - ' + f).join('\n') + '\n' : '');
   console.log(`${pass} passed, ${fail} failed`);
+  proc.kill();
   process.exit(fail ? 1 : 0);
-})().catch((e) => { console.error('CRASH', e); process.exit(1); });
+})().catch((e) => {
+  console.error('CRASH', e);
+  console.error('\nLog server:\n' + serverLog.slice(-2000));
+  proc.kill();
+  process.exit(1);
+});

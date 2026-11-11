@@ -1,7 +1,6 @@
 /**
  * Uji alur produksi nyata terhadap Worker yang sudah ter-deploy.
- * Butuh env WORKER_URL. Email memakai gmail.com karena Supabase memblokir
- * domain sekali pakai seperti t.com.
+ * Butuh env WORKER_URL (default: https://finnotes.tenzou.dev).
  */
 const B = process.env.WORKER_URL || 'https://finnotes.tenzou.dev';
 const MAIL = (n) => `kjtest.${n}.${Date.now()}@gmail.com`;
@@ -34,22 +33,23 @@ try {
   });
   ok('signup Andi 200', andi.status === 200, JSON.stringify(andi.data));
   if (andi.status !== 200) {
-    // Rate limit / konfigurasi auth. Sisa test butuh user jadi tidak bisa jalan.
-    console.log('\nSignup gagal - sisa test dilewati. Tunggu rate limit Supabase, lalu jalankan ulang.');
+    // Kalau signup awal gagal (mis. config), sisa test tidak bisa jalan.
+    console.log('\nSignup gagal - sisa test dilewati.');
     throw new Error('SKIP: signup awal gagal: ' + JSON.stringify(andi.data));
   }
   ok('token diberikan', !!andi.data.token, JSON.stringify(andi.data).slice(0, 120));
-  ok('refresh_token diberikan', !!andi.data.refresh_token);
+  ok('expiresAt diberikan (ms)', Number.isFinite(andi.data.expiresAt) && andi.data.expiresAt > Date.now(), String(andi.data.expiresAt));
+  ok('tanpa refresh_token', andi.data.refresh_token === undefined, String(andi.data.refresh_token));
   ok('household terbentuk', andi.data.household?.name === 'Rumah Andi', JSON.stringify(andi.data.household));
-  ok('join_code ada (6 hex)', /^[0-9A-F]{6}$/i.test(andi.data.household?.join_code || ''), andi.data.household?.join_code);
+  ok('join_code 6 karakter A-Z2-9', /^[A-Z2-9]{6}$/.test(andi.data.household?.join_code || ''), andi.data.household?.join_code);
   const tA = andi.data.token;
   const code = andi.data.household.join_code;
 
-  section('profile otomatis oleh trigger');
+  section('profile & role');
   const meA = await call('GET', '/api/auth/me', { token: tA });
   ok('me nama user', meA.data.user?.name === 'Andi', JSON.stringify(meA.data.user));
   ok('me punya 1 household', meA.data.households?.length === 1, JSON.stringify(meA.data.households));
-  // Pembuat household adalah owner (schema.sql setup_my_household -> role 'owner')
+  // Pembuat household berperan owner (signUp store D1)
   ok('pembuat household berperan owner', meA.data.households?.[0]?.role === 'owner', meA.data.households?.[0]?.role);
 
   section('signup kedua + gabung via kode');
@@ -60,18 +60,18 @@ try {
   ok('Siti masuk household Andi', siti.data.household?.id === andi.data.household.id, `${siti.data.household?.id} vs ${andi.data.household.id}`);
   ok('gabung tanpa warning', !siti.data.warning, siti.data.warning);
   const tB = siti.data.token;
-  // Yang gabung lewat kode berperan member (schema.sql join_household -> role 'member')
+  // Yang gabung lewat kode berperan member (store D1: role 'member')
   const meB = await call('GET', '/api/auth/me', { token: tB });
   ok('yang gabung lewat kode berperan member', meB.data.households?.[0]?.role === 'member', meB.data.households?.[0]?.role);
 
-  section('RLS: data bersama & isolasi');
+  section('data bersama & isolasi');
   const c1 = await call('POST', '/api/chat', { token: tA, body: { text: 'gaji 5jt' } });
   ok('Andi catat gaji', c1.status === 200 && c1.data.transaction?.amount === 5000000, JSON.stringify(c1.data).slice(0, 140));
   const c2 = await call('POST', '/api/chat', { token: tB, body: { text: 'beli kopi 15rb' } });
   ok('Siti catat pengeluaran', c2.status === 200 && c2.data.transaction?.amount === 15000, JSON.stringify(c2.data).slice(0, 140));
   const stB = await call('GET', '/api/state', { token: tB });
   ok('Siti melihat 2 transaksi', stB.data.transactions?.length === 2, String(stB.data.transactions?.length));
-  ok('author terisi (embed profiles)', stB.data.transactions.every((t) => !!t.author), JSON.stringify(stB.data.transactions.map((t) => t.author)));
+  ok('author terisi (join users)', stB.data.transactions.every((t) => !!t.author), JSON.stringify(stB.data.transactions.map((t) => t.author)));
   ok('balance konsisten', stB.data.totals.balance === 4985000, JSON.stringify(stB.data.totals));
 
   section('household stranger tidak boleh bocor');
@@ -88,28 +88,30 @@ try {
   const an = await call('GET', '/api/analytics?period=all', { token: tY });
   ok('Yuni analytics kosong', (an.data.summary?.income || 0) === 0, JSON.stringify(an.data.summary));
 
-  section('kode undangan salah -> household cadangan');
+  section('kode undangan salah -> 400, akun tidak jadi');
+  const zakiMail = MAIL('zaki');
   const zaki = await call('POST', '/api/auth/signup', {
-    body: { email: MAIL('zaki'), password: 'rahasia123456', name: 'Zaki', joinCode: 'ZZZZZZ' },
+    body: { email: zakiMail, password: 'rahasia123456', name: 'Zaki', joinCode: 'ZZZZZZ' },
   });
-  ok('signup kode salah 200', zaki.status === 200, JSON.stringify(zaki.data).slice(0, 140));
-  ok('ada warning', !!zaki.data.warning, String(zaki.data.warning));
-  ok('dapat household cadangan', !!zaki.data.household?.id, JSON.stringify(zaki.data.household));
-  const stZ = await call('GET', '/api/state', { token: zaki.data.token });
-  ok('Zaki tidak terjebak (bisa buka app)', stZ.status === 200 && !!stZ.data.household?.id, JSON.stringify(stZ.data.household));
-  const cZ = await call('POST', '/api/chat', { token: zaki.data.token, body: { text: 'gaji 2jt' } });
-  ok('Zaki bisa catat transaksi', cZ.status === 200 && cZ.data.transaction?.amount === 2000000, JSON.stringify(cZ.data).slice(0, 140));
+  // Store D1 menolak kode SEBELUM akun dibuat -> 400 polos, tanpa fallback.
+  ok('signup kode salah -> 400', zaki.status === 400 && /tidak ditemukan/.test(zaki.data.error || ''), JSON.stringify(zaki.data).slice(0, 140));
+  ok('tidak ada household cadangan', zaki.data.household === undefined, JSON.stringify(zaki.data.household));
+  const zakiLogin = await call('POST', '/api/auth/login', { body: { email: zakiMail, password: 'rahasia123456' } });
+  ok('akun Zaki tidak jadi dibuat', zakiLogin.status === 401, `status ${zakiLogin.status}`);
+
+  // lanjut pakai user valid untuk edit & hapus
+  const cZ = await call('POST', '/api/chat', { token: tY, body: { text: 'gaji 2jt' } });
+  ok('Yuni bisa catat transaksi', cZ.status === 200 && cZ.data.transaction?.amount === 2000000, JSON.stringify(cZ.data).slice(0, 140));
 
   section('edit & hapus');
-  // Target harus transaksi milik Zaki yang baru saja dicatat (cZ), bukan stZ
-  // yang diambil sebelum Zaki mencatat apa pun.
+  // Target harus transaksi milik Yuni yang baru saja dicatat (cZ).
   const target = cZ.data.transaction;
-  const pa = await call('PATCH', '/api/transactions/' + target.id, { token: zaki.data.token, body: { amount: 2500000 } });
+  const pa = await call('PATCH', '/api/transactions/' + target.id, { token: tY, body: { amount: 2500000 } });
   ok('patch 200', pa.status === 200 && pa.data.transaction?.amount === 2500000, JSON.stringify(pa.data).slice(0, 140));
-  const de = await call('DELETE', '/api/transactions/' + target.id, { token: zaki.data.token });
+  const de = await call('DELETE', '/api/transactions/' + target.id, { token: tY });
   ok('delete 200 (bukan 405)', de.status === 200, `${de.status} ${JSON.stringify(de.data).slice(0, 100)}`);
-  const stZ2 = await call('GET', '/api/state', { token: zaki.data.token });
-  ok('saldo kembali 0', stZ2.data.totals.balance === 0, JSON.stringify(stZ2.data.totals));
+  const stZ2 = await call('GET', '/api/state', { token: tY });
+  ok('saldo Yuni kembali 0', stZ2.data.totals.balance === 0, JSON.stringify(stZ2.data.totals));
 
   section('login ulang');
   const wrong = await call('POST', '/api/auth/login', { body: { email: MAIL('andi').replace(/\.\d+@/, '@').replace('kjtest.andi', 'x'), password: 'salahsalah' } });
@@ -124,10 +126,10 @@ try {
   ok('token ngawur -> 401', (await call('GET', '/api/auth/me', { token: 'tok_palsu' })).status === 401);
   ok('chat tanpa login -> 401', (await call('POST', '/api/chat', { body: { text: 'x' } })).status === 401);
   ok('chat tanpa text -> 400', (await call('POST', '/api/chat', { token: tA, body: {} })).status === 400);
-  // endpoint google oauth: tanpa kredensial Google alur penuh tidak bisa
-  // diuji, tapi gate-nya harus hidup dan menolak token kosong/ngawur.
-  ok('google tanpa token -> 401', (await call('POST', '/api/auth/google', { body: {} })).status === 401);
-  ok('google token ngawur -> 401', (await call('POST', '/api/auth/google', { token: 'bukan-token-google', body: {} })).status === 401);
+  // endpoint google: tanpa kredensial Google alur penuh tidak bisa diuji,
+  // tapi gate-nya harus hidup dan menolak payload kosong/token ngawur.
+  ok('google tanpa credential -> 400', (await call('POST', '/api/auth/google', { body: {} })).status === 400);
+  ok('google token ngawur -> 400', (await call('POST', '/api/auth/google', { body: { credential: 'bukan-jwt' } })).status === 400);
 
   section('export');
   const csv = await fetch(B + '/api/export/transactions.csv', { headers: { Authorization: 'Bearer ' + tB } });
@@ -152,5 +154,5 @@ if (fails.length) {
   process.exit(1);
 } else {
   console.log('\nSemua alur produksi lulus. User test yang dibuat:');
-  console.log('  andi, siti, yuni, zaki (prefix kjtest.*@gmail.com)');
+  console.log('  andi, siti, yuni (prefix kjtest.*@gmail.com)');
 }

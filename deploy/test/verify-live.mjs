@@ -19,7 +19,7 @@ const B = process.env.WORKER_URL || 'https://finnotes.tenzou.dev';
   r = await fetch(B + '/api/state');
   console.log('no auth ', r.status, (await r.text()).slice(0, 60));
 
-  for (const a of ['/app.js', '/api.js', '/auth.js', '/supa.js']) {
+  for (const a of ['/app.js', '/api.js', '/auth.js']) {
     r = await fetch(B + a);
     console.log('asset   ', a.padEnd(11), r.status, r.headers.get('content-type'));
   }

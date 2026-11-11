@@ -1,8 +1,8 @@
 {
   "name": "finnotes-deploy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "FinNotes - Cloudflare Worker + Supabase",
+  "description": "FinNotes - Cloudflare Worker + D1",
   "type": "module",
   "main": "worker.js",
   "scripts": {
@@ -13,13 +13,9 @@
     "test": "node test/worker.test.mjs",
     "test:live": "node test/live.e2e.mjs",
     "verify:live": "node test/verify-live.mjs",
-    "test:dry": "wrangler deploy --dry-run --outdir .wrangler-dryrun",
-    "secret": "wrangler secret put SUPABASE_ANON_KEY"
+    "test:dry": "wrangler deploy --dry-run --outdir .wrangler-dryrun"
   },
   "devDependencies": {
     "wrangler": "^4.143.0"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.117.2"
   }
 }

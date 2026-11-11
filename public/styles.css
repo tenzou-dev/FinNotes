@@ -707,7 +707,7 @@ h1, h2 { margin: 0; font-weight: 600; }
 .auth-btn:hover:not(:disabled) { background: var(--green-deep); }
 .auth-btn:disabled { opacity: .6; cursor: default; }
 
-/* pemisah + tombol OAuth (Google) */
+/* pemisah + slot tombol Google (GIS merender iframe sendiri di sini) */
 .auth-alt {
   display: flex;
   align-items: center;
@@ -717,26 +717,8 @@ h1, h2 { margin: 0; font-weight: 600; }
 }
 .auth-alt small { font-family: var(--font-mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 1px; }
 .auth-alt::before, .auth-alt::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-.oauth-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border: 1px solid var(--line);
-  background: var(--card);
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  padding: 11px;
-  border-radius: 10px;
-  cursor: pointer;
-  margin-top: 12px;
-}
-.oauth-btn:hover:not(:disabled) { background: var(--paper-deep); }
-.oauth-btn:disabled { opacity: .6; cursor: default; }
-.oauth-btn svg { flex: none; }
+.oauth-slot { margin-top: 12px; display: flex; justify-content: center; }
+.oauth-slot[hidden] { display: none; }
 
 .auth-hint { text-align: center; font-family: var(--font-mono); font-size: 9.5px; color: var(--muted); margin: 14px 0 0; }
 

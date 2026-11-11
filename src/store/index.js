@@ -1,47 +1,32 @@
 'use strict';
 
-const { detectBackend } = require('../config');
-const sqlite = require('./sqlite');
-const supabase = require('./supabase');
+/**
+ * Entry store untuk runtime Node (server lokal + e2e test).
+ *
+ * Store-nya sama persis dengan Worker produksi (src/store/d1.js); hanya
+ * binding "D1" digantikan adapter node:sqlite. Schema, hash password,
+ * dan perilaku query identik antara lokal dan produksi.
+ *
+ * File DB dipilih lewat env SQLITE_FILE:
+ *   - default    : data/finnotes.db (dibuat otomatis kalau belum ada)
+ *   - ':memory:' : DB in-memory, untuk test (selalu mulai kosong)
+ *
+ * Catatan: file ini TIDAK BOLEH ikut ter-bundle ke Worker
+ * (dijaga oleh deploy/check-worker-deps.mjs).
+ */
 
-const MODE = detectBackend();
-const impl = MODE === 'supabase' ? supabase : sqlite;
+const fs = require('node:fs');
+const path = require('node:path');
 
-const wrap = (fn) => async (...args) => fn(...args);
+const store = require('./d1');
+const { openD1 } = require('./node-d1');
 
-const DATA_METHODS = [
-  'listHouseholds', 'getMembership', 'listMembers',
-  'getUserById', 'getHousehold', 'createHousehold', 'joinHousehold',
-  'insertTransaction', 'listTransactions', 'getTransaction', 'updateTransaction',
-  'deleteTransaction', 'deleteLastTransaction', 'deleteAllTransactions',
-  'totals', 'periodTotals', 'previousPeriodTotals', 'topCategories',
-  'dailySeries', 'activeDays', 'insertMessage', 'lastMessages',
-];
+const FILE = process.env.SQLITE_FILE || path.join(__dirname, '..', '..', 'data', 'finnotes.db');
+if (FILE !== ':memory:') fs.mkdirSync(path.dirname(FILE), { recursive: true });
 
-const store = { BACKEND: MODE, IS_ASYNC: MODE === 'supabase' };
-
-for (const m of DATA_METHODS) {
-  store[m] = MODE === 'supabase' ? impl[m] : wrap(impl[m]);
-}
-
-if (MODE === 'sqlite') {
-  // SQLite lokal tidak punya konsep join code antar user.
-  store.joinHousehold = () => {
-    throw new Error('Gabung lewat kode hanya tersedia di mode Supabase');
-  };
-}
-
-if (MODE === 'supabase') {
-  store.signUp = supabase.signUp;
-  store.signIn = supabase.signIn;
-  store.getSession = supabase.getSession;
-} else {
-  store.signUp = async ({ email, password, name, householdName, joinCode }) => {
-    const { user, household } = sqlite.createUser({ email, password, name, householdName, joinCode });
-    return { user, household };
-  };
-  store.signIn = async ({ email, password }) => ({ user: sqlite.login({ email, password }) });
-  store.getSession = async () => null;
-}
+store.configure({
+  db: openD1(FILE),
+  iterations: Number(process.env.PBKDF2_ITERATIONS) || undefined,
+});
 
 module.exports = store;

@@ -1,8 +1,8 @@
 {
   "name": "keuangan-chat",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Pencatatan keuangan lewat chat - rule based parser, multi-user household, Supabase",
+  "description": "Pencatatan keuangan lewat chat - rule based parser, multi-user household, Cloudflare D1",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
@@ -17,8 +17,6 @@
     "node": ">=22.5.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.117.2",
-    "cookie-parser": "^1.4.7",
     "express": "^4.22.3"
   }
 }

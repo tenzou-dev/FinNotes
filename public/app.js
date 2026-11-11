@@ -377,26 +377,17 @@ async function boot() {
   try {
     const { config } = await initAuth();
 
-    if (config.backend === 'supabase' && !getSession()) {
+    if (!getSession()) {
       location.href = './login.html';
       return;
-    }
-    if (config.backend !== 'supabase' && getSession()?.access_token === 'local') {
-      localStorage.removeItem('kj_session');
     }
 
     const me = await apiJson('/api/auth/me');
     state.user = me.user;
     el.whoami.textContent = me.user.name || me.user.email;
     el.houseLabel.textContent = me.households?.[0]?.name || 'Buku';
-    el.backendNote.textContent = config.backend === 'supabase'
-      ? 'Tersimpan di Supabase' : 'Tersimpan lokal (SQLite)';
-
-    const warned = sessionStorage.getItem('kj_signup_warning');
-    if (warned) {
-      sessionStorage.removeItem('kj_signup_warning');
-      toast(`Kode undangan ditolak (${warned}). Household "${el.houseLabel.textContent}" dibuat untukmu.`);
-    }
+    el.backendNote.textContent = config.local
+      ? 'Tersimpan lokal (SQLite)' : 'Tersimpan di Cloudflare D1';
 
     await refresh();
   } catch (e) {
@@ -467,8 +458,9 @@ document.addEventListener('click', (e) => {
 });
 
 $('#btnLogout').onclick = async () => {
-  clearSession();
+  // hapus sesi di server DULU (masih pakai token), baru buang token lokal
   try { await apiFetch('/api/auth/logout', { method: 'POST' }); } catch { }
+  clearSession();
   location.href = './login.html';
 };
 

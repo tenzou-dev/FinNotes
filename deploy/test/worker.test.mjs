@@ -1,18 +1,22 @@
 /**
- * E2E untuk Cloudflare Worker terhadap mock Supabase.
+ * E2E untuk Cloudflare Worker di atas store D1.
  *
- * Menjalankan worker.js sungguhan (modul ESM yang sama dengan yang di-deploy)
- * dengan binding ASSETS tiruan dan SUPABASE_URL yang menunjuk ke mock
- * PostgREST/GoTrue lokal. Jadi yang ter-cover di sini: routing Worker,
- * parsing body/param, adapter Supabase, dan seluruh alur bisnis.
+ * Menjalankan worker.js sungguhan (modul ESM yang sama dengan yang
+ * di-deploy) dengan binding DB tiruan (node:sqlite ':memory:' lewat
+ * adapter ala D1) dan binding ASSETS tiruan. Yang ter-cover: routing
+ * Worker, parsing body/param, store D1, dan seluruh alur bisnis.
  *
- * RLS tidak diuji di sini (mock tidak mensimulasikan RLS).
+ * Login Google diuji sungguhan: ID token JWT ditandatangani WebCrypto
+ * (RS256 & ES256), JWKS disajikan lewat stub globalThis.fetch, termasuk
+ * skenario rotasi kunci.
  *
  * Jalankan: node deploy/test/worker.test.mjs
  */
 
-import { createMockSupabase, ANON_KEY, reset, db } from '../mock-supabase.mjs';
+import nodeD1 from '../../src/store/node-d1.js';
 import worker from '../worker.js';
+
+const { openD1 } = nodeD1;
 
 /* ---------------- harness ---------------- */
 
@@ -31,12 +35,7 @@ function ok(name, cond, extra = '') {
 
 const section = (t) => console.log(`\n${t}`);
 
-/* ---------------- server mock ---------------- */
-
-const mock = createMockSupabase();
-await new Promise((r) => mock.listen(0, r));
-const mockPort = mock.address().port;
-const SUPA_URL = `http://localhost:${mockPort}`;
+/* ---------------- env ---------------- */
 
 const assets = {
   fetch: async (request) => new Response(`asset:${new URL(request.url).pathname}`, {
@@ -44,7 +43,14 @@ const assets = {
   }),
 };
 
-const env = { SUPABASE_URL: SUPA_URL, SUPABASE_ANON_KEY: ANON_KEY, ASSETS: assets };
+const GOOGLE_CLIENT_ID = 'test-google-client.apps.googleusercontent.com';
+
+const env = {
+  DB: openD1(':memory:'),
+  ASSETS: assets,
+  GOOGLE_CLIENT_ID,
+  PBKDF2_ITERATIONS: '1000', // supaya test cepat; produksi 10000
+};
 
 const APP_URL = 'https://app.test';
 
@@ -63,6 +69,63 @@ async function call(method, path, { token, body } = {}) {
   return { status: res.status, data, res };
 }
 
+/* ---------------- Google OIDC: kunci + stub JWKS ---------------- */
+
+const enc = new TextEncoder();
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function makeKey(alg, kid) {
+  if (alg === 'ES256') {
+    const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    const jwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
+    return { alg, kp, kid, jwk: { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y, kid, use: 'sig', alg } };
+  }
+  const kp = await crypto.subtle.generateKey(
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) },
+    true, ['sign', 'verify']
+  );
+  const jwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
+  return { alg, kp, kid, jwk: { kty: 'RSA', n: jwk.n, e: jwk.e, kid, use: 'sig', alg } };
+}
+
+/** WebCrypto ECDSA menandatangani dalam bentuk raw r||s — persis format Google. */
+async function signIdToken(key, payload) {
+  const h = b64url(enc.encode(JSON.stringify({ alg: key.alg, kid: key.kid, typ: 'JWT' })));
+  const p = b64url(enc.encode(JSON.stringify(payload)));
+  const data = enc.encode(`${h}.${p}`);
+  const alg = key.alg === 'ES256' ? { name: 'ECDSA', hash: 'SHA-256' } : 'RSASSA-PKCS1-v1_5';
+  const sig = await crypto.subtle.sign(alg, key.kp.privateKey, data);
+  return `${h}.${p}.${b64url(sig)}`;
+}
+
+const googlePayload = (over = {}) => ({
+  iss: 'https://accounts.google.com',
+  aud: GOOGLE_CLIENT_ID,
+  sub: 'gsub-' + Math.random().toString(36).slice(2, 10),
+  email: `g${Date.now()}.${Math.random().toString(36).slice(2, 8)}@gmail.com`,
+  email_verified: true,
+  name: 'Budi Google',
+  picture: 'https://lh3.googleusercontent.com/a/x',
+  exp: Math.floor(Date.now() / 1000) + 600,
+  iat: Math.floor(Date.now() / 1000),
+  ...over,
+});
+
+const rsaKey = await makeKey('RS256', 'test-rsa');
+const ecKey = await makeKey('ES256', 'test-ec');
+let jwksKeys = [rsaKey.jwk, ecKey.jwk];
+
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, ...rest) => {
+  if (String(url).startsWith('https://www.googleapis.com/oauth2/v3/certs')) {
+    return new Response(JSON.stringify({ keys: jwksKeys }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  return realFetch(url, ...rest);
+};
+
 /* ---------------- tests ---------------- */
 
 try {
@@ -71,7 +134,9 @@ try {
     const r = await worker.fetch(new Request('https://app.test/login.html'), env, {});
     ok('login.html dilayani ASSETS', (await r.text()) === 'asset:/login.html');
     const cfg = await call('GET', '/api/config');
-    ok('api/config backend supabase', cfg.data.backend === 'supabase', JSON.stringify(cfg.data));
+    ok('api/config backend d1', cfg.data.backend === 'd1', JSON.stringify(cfg.data));
+    ok('api/config local false', cfg.data.local === false, JSON.stringify(cfg.data));
+    ok('api/config googleClientId', cfg.data.googleClientId === GOOGLE_CLIENT_ID, JSON.stringify(cfg.data));
     const nf = await call('GET', '/api/tidak-ada');
     ok('route tidak dikenal -> 404', nf.status === 404);
     const wrong = await call('DELETE', '/api/state');
@@ -90,8 +155,11 @@ try {
   });
   ok('signup Andi 200', suA.status === 200, JSON.stringify(suA.data).slice(0, 160));
   ok('signup mengembalikan token', !!suA.data.token);
+  ok('signup mengembalikan expiresAt (ms)', Number.isFinite(suA.data.expiresAt) && suA.data.expiresAt > Date.now(), String(suA.data.expiresAt));
+  ok('tanpa refresh_token', suA.data.refresh_token === undefined, String(suA.data.refresh_token));
   ok('signup membuat household', !!suA.data.household?.id && !!suA.data.household?.join_code, JSON.stringify(suA.data.household));
-  const tokenA = suA.data.token;
+  ok('join_code format A-Z2-9 (tanpa 0/O/1/I)', /^[A-Z2-9]{6}$/.test(suA.data.household?.join_code || ''), suA.data.household?.join_code);
+  let tokenA = suA.data.token;
   const houseId = suA.data.household.id;
   const joinCode = suA.data.household.join_code;
 
@@ -111,25 +179,9 @@ try {
   const badCode = await call('POST', '/api/auth/signup', {
     body: { email: `y${stamp}@t.com`, password: 'rahasia123', name: 'Y', joinCode: 'ZZZZZZ' },
   });
-  // Di Supabase, akun sudah dibuat Supabase Auth sebelum join dicoba sehingga
-  // tidak bisa di-rollback. Worker lalu membuat household cadangan dan
-  // mengembalikan warning - bukan 400. Assert perilaku yang memang itu.
-  ok('kode undangan salah -> 200 + warning', badCode.status === 200 && !!badCode.data.warning, JSON.stringify(badCode.data).slice(0, 200));
-  ok('kode undangan salah tetap dapat household cadangan', !!badCode.data.household?.id, JSON.stringify(badCode.data.household));
-  ok('household cadangan pakai nama default', badCode.data.household?.name === 'Rumah Tangga', String(badCode.data.household?.name));
-  ok('signup mengembalikan refresh_token', !!badCode.data.refresh_token, String(badCode.data.refresh_token));
-
-  // Regression: user yang kodenya ditolak harus tetap bisa memakai aplikasi.
-  // Kalau household cadangan tidak terbentuk, user terjebak tanpa buku.
-  {
-    const t = badCode.data.token;
-    const badMe = await call('GET', '/api/auth/me', { token: t });
-    ok('user kode salah punya household (tidak terjebak)', badMe.data.households?.length === 1, JSON.stringify(badMe.data.households));
-    const badState = await call('GET', '/api/state', { token: t });
-    ok('user kode salah bisa buka app', badState.status === 200 && badState.data.household?.id === badCode.data.household.id, JSON.stringify(badState.data.household));
-    const badChat = await call('POST', '/api/chat', { token: t, body: { text: 'gaji 3jt' } });
-    ok('user kode salah bisa catat transaksi', badChat.status === 200 && badChat.data.transaction?.amount === 3000000, JSON.stringify(badChat.data).slice(0, 140));
-  }
+  // Store D1 bisa menolak kode SEBELUM akun dibuat (transaksional) -> 400.
+  ok('kode undangan salah -> 400', badCode.status === 400 && /tidak ditemukan/.test(badCode.data.error || ''), JSON.stringify(badCode.data));
+  ok('kode salah tidak membuat akun', (await call('POST', '/api/auth/login', { body: { email: `y${stamp}@t.com`, password: 'rahasia123' } })).status === 401);
 
   section('login & session');
   {
@@ -138,12 +190,13 @@ try {
 
     const good = await call('POST', '/api/auth/login', { body: { email: emailA, password: 'rahasia123' } });
     ok('login berhasil', good.status === 200 && !!good.data.token, JSON.stringify(good.data).slice(0, 120));
-    ok('login mengembalikan refresh_token', !!good.data.refresh_token, String(good.data.refresh_token));
+    ok('login mengembalikan expiresAt', Number.isFinite(good.data.expiresAt) && good.data.expiresAt > Date.now(), String(good.data.expiresAt));
     ok('login melihat household', good.data.households?.length === 1, JSON.stringify(good.data.households));
 
     const me = await call('GET', '/api/auth/me', { token: tokenA });
     ok('me mengembalikan nama user', me.data.user?.name === 'Andi', JSON.stringify(me.data.user));
     ok('me mengembalikan household', me.data.households?.length === 1);
+    ok('pembuat household berperan owner', me.data.households?.[0]?.role === 'owner', me.data.households?.[0]?.role);
 
     const noTok = await call('GET', '/api/auth/me');
     ok('tanpa token -> 401', noTok.status === 401);
@@ -151,46 +204,81 @@ try {
     ok('token ngawur -> 401', badTok.status === 401);
   }
 
-  section('login google (oauth)');
+  section('login google (ID token + JWKS)');
   {
-    const noTok = await call('POST', '/api/auth/google', { body: {} });
-    ok('google tanpa token -> 401', noTok.status === 401, JSON.stringify(noTok.data));
+    const noCred = await call('POST', '/api/auth/google', { body: {} });
+    ok('google tanpa credential -> 400', noCred.status === 400 && /tidak diterima/.test(noCred.data.error || ''), JSON.stringify(noCred.data));
 
-    const badTok = await call('POST', '/api/auth/google', { token: 'tok_palsu', body: {} });
-    ok('google token ngawur -> 401', badTok.status === 401, JSON.stringify(badTok.data));
+    // GOOGLE_CLIENT_ID dibaca dari req.env per-request
+    const noCfg = await worker.fetch(new Request(APP_URL + '/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: 'x.y.z' }),
+    }), { DB: env.DB, ASSETS: assets, PBKDF2_ITERATIONS: '1000' }, {});
+    const noCfgData = await noCfg.json();
+    ok('env tanpa GOOGLE_CLIENT_ID -> 400 belum dikonfigurasi',
+      noCfg.status === 400 && /belum dikonfigurasi/.test(noCfgData.error || ''), JSON.stringify(noCfgData));
 
-    // simulasi user yang dibuat lewat Google OAuth: tanpa password, nama
-    // asli ada di user_metadata.full_name (bukan display_name)
-    const gid = crypto.randomUUID();
-    const gEmail = `budi.google.${stamp}@gmail.com`;
-    db.authUsers.push({
-      id: gid, email: gEmail, password: null,
-      user_metadata: { full_name: 'Budi Google', email: gEmail },
-      created_at: new Date().toISOString(),
+    const sub1 = `gsub-rsa-${stamp}`;
+    const gEmail1 = `budi.google.${stamp}@gmail.com`;
+    const t1 = await signIdToken(rsaKey, googlePayload({ sub: sub1, email: gEmail1, name: 'Budi Google' }));
+    const g1 = await call('POST', '/api/auth/google', { body: { credential: t1 } });
+    ok('google RS256 200', g1.status === 200, JSON.stringify(g1.data).slice(0, 160));
+    ok('google user dari klaim token', g1.data.user?.email === gEmail1 && g1.data.user?.name === 'Budi Google', JSON.stringify(g1.data.user));
+    ok('google membuat household', !!g1.data.household?.id, JSON.stringify(g1.data.household));
+    ok('google memberi token sesi', !!g1.data.token);
+    const gTok = g1.data.token;
+
+    // login ulang dengan credential yang sama -> household lama (idempotent)
+    const g2 = await call('POST', '/api/auth/google', { body: { credential: t1 } });
+    ok('google ulang -> household sama', g2.status === 200 && g2.data.household?.id === g1.data.household?.id,
+      `${g2.data.household?.id} vs ${g1.data.household?.id}`);
+
+    const chatG = await call('POST', '/api/chat', { token: gTok, body: { text: 'gaji 2jt' } });
+    ok('user google bisa chat transaksi', chatG.status === 200 && chatG.data.transaction?.amount === 2000000, JSON.stringify(chatG.data).slice(0, 140));
+
+    // ES256 (Google memakai EC P-256; signature raw r||s -> DER di oidc.js)
+    const gEmail2 = `cita.ec.${stamp}@gmail.com`;
+    const t2 = await signIdToken(ecKey, googlePayload({ sub: `gsub-ec-${stamp}`, email: gEmail2, name: 'Cita EC' }));
+    const g3 = await call('POST', '/api/auth/google', { body: { credential: t2 } });
+    ok('google ES256 200', g3.status === 200, JSON.stringify(g3.data).slice(0, 120));
+    ok('google ES256 user benar', g3.data.user?.email === gEmail2, JSON.stringify(g3.data.user));
+
+    // user password yang login google pertama kali -> akunnya di-link
+    const t3 = await signIdToken(rsaKey, googlePayload({ sub: `gsub-link-${stamp}`, email: emailA, name: 'Andi Google' }));
+    const g4 = await call('POST', '/api/auth/google', { body: { credential: t3 } });
+    ok('google link ke akun email sama', g4.status === 200 && g4.data.user?.id === suA.data.user?.id, JSON.stringify(g4.data.user));
+    const relogA = await call('POST', '/api/auth/login', { body: { email: emailA, password: 'rahasia123' } });
+    ok('password tetap jalan setelah link google', relogA.status === 200 && !!relogA.data.token, JSON.stringify(relogA.data).slice(0, 80));
+
+    const badAud = await call('POST', '/api/auth/google', {
+      body: { credential: await signIdToken(rsaKey, googlePayload({ aud: 'client-lain' })) },
     });
-    db.profiles.push({ id: gid, email: gEmail, display_name: 'Budi Google' });
-    db.sessions.set(`tok_${gid}`, gid);
-    const gTok = `tok_${gid}`;
+    ok('aud salah -> 400', badAud.status === 400 && /bukan untuk aplikasi/.test(badAud.data.error || ''), JSON.stringify(badAud.data));
 
-    const g = await call('POST', '/api/auth/google', {
-      token: gTok,
-      body: { refresh_token: `ref_${gid}`, expires_at: 123456 },
+    const expired = await call('POST', '/api/auth/google', {
+      body: { credential: await signIdToken(rsaKey, googlePayload({ exp: Math.floor(Date.now() / 1000) - 120 })) },
     });
-    ok('google login 200', g.status === 200, JSON.stringify(g.data).slice(0, 160));
-    ok('google mengembalikan token', g.data.token === gTok, String(g.data.token));
-    ok('google memakai nama dari Google', g.data.user?.name === 'Budi Google', JSON.stringify(g.data.user));
-    ok('google membuat household', !!g.data.household?.id, JSON.stringify(g.data.household));
-    ok('google echo refresh_token dari body', g.data.refresh_token === `ref_${gid}`, String(g.data.refresh_token));
-    ok('google echo expires_at dari body', g.data.expires_at === 123456, String(g.data.expires_at));
+    ok('exp kedaluwarsa -> 400', expired.status === 400 && /kedaluwarsa/.test(expired.data.error || ''), JSON.stringify(expired.data));
 
-    // pemanggilan ulang (mis. login Google berikutnya) tidak membuat household baru
-    const g2 = await call('POST', '/api/auth/google', { token: gTok, body: {} });
-    ok('google ulang -> household sama', g2.status === 200 && g2.data.household?.id === g.data.household?.id,
-      `${g2.data.household?.id} vs ${g.data.household?.id}`);
+    const unverified = await call('POST', '/api/auth/google', {
+      body: { credential: await signIdToken(rsaKey, googlePayload({ email_verified: false })) },
+    });
+    ok('email belum terverifikasi -> 400', unverified.status === 400 && /belum terverifikasi/.test(unverified.data.error || ''), JSON.stringify(unverified.data));
 
-    // user google bisa langsung pakai app seperti user biasa
-    const chat = await call('POST', '/api/chat', { token: gTok, body: { text: 'gaji 2jt' } });
-    ok('user google bisa chat transaksi', chat.status === 200 && chat.data.transaction?.amount === 2000000, JSON.stringify(chat.data).slice(0, 140));
+    // payload diganti setelah ditandatangani -> signature mismatch
+    const signed = await signIdToken(rsaKey, googlePayload({ sub: 'gsub-asli' }));
+    const [h7, , s7] = signed.split('.');
+    const tampered = `${h7}.${b64url(enc.encode(JSON.stringify(googlePayload({ sub: 'gsub-palsu' }))))}.${s7}`;
+    const badSig = await call('POST', '/api/auth/google', { body: { credential: tampered } });
+    ok('payload dipalsukan -> 400 gagal diverifikasi', badSig.status === 400 && /gagal diverifikasi/.test(badSig.data.error || ''), JSON.stringify(badSig.data));
+
+    // rotasi kunci: kid baru tidak ada di cache JWKS -> refetch -> tetap 200
+    const rsaKey2 = await makeKey('RS256', 'test-rsa-2');
+    jwksKeys = [rsaKey2.jwk, ecKey.jwk];
+    const t8 = await signIdToken(rsaKey2, googlePayload({ sub: `gsub-rotasi-${stamp}`, email: `rotasi.${stamp}@gmail.com`, name: 'Rotasi Kunci' }));
+    const g8 = await call('POST', '/api/auth/google', { body: { credential: t8 } });
+    ok('kid baru (rotasi JWKS) -> 200', g8.status === 200, JSON.stringify(g8.data).slice(0, 120));
   }
 
   section('chat multi-transaksi & data bersama');
@@ -200,7 +288,7 @@ try {
 
     const c1 = await call('POST', '/api/chat', { token: tokenA, body: { text: 'gaji 8jt' } });
     ok('Andi catat gaji', c1.status === 200 && c1.data.transaction?.amount === 8000000, JSON.stringify(c1.data).slice(0, 140));
-    ok('baldo setelah gaji 8jt', c1.data.totals?.balance === 8000000, JSON.stringify(c1.data.totals));
+    ok('saldo setelah gaji 8jt', c1.data.totals?.balance === 8000000, JSON.stringify(c1.data.totals));
 
     const c2 = await call('POST', '/api/chat', { token: tokenB, body: { text: 'beli nasi 25rb sama kopi 15rb' } });
     ok('Siti catat 2 transaksi', c2.status === 200 && c2.data.transactions?.length === 2, JSON.stringify(c2.data).slice(0, 160));
@@ -218,7 +306,7 @@ try {
     ok('saldo konsisten antar user', stA.data.totals.balance === stB.data.totals.balance, `${stA.data.totals.balance} vs ${stB.data.totals.balance}`);
     // 8.000.000 - (25.000 + 15.000 + 1.200.000) = 6.760.000
     ok('total 4 transaksi = 8jt - 1,24jt', stA.data.totals.balance === 6760000, JSON.stringify(stA.data.totals));
-    ok('author terisi dari profiles', stA.data.transactions.every((t) => !!t.author), JSON.stringify(stA.data.transactions.map((t) => t.author)));
+    ok('author terisi dari users', stA.data.transactions.every((t) => !!t.author), JSON.stringify(stA.data.transactions.map((t) => t.author)));
 
     const rekap = await call('POST', '/api/chat', { token: tokenA, body: { text: 'rekap bulan ini' } });
     ok('perintah rekap dijawab', rekap.status === 200 && /Rekap/.test(rekap.data.text), rekap.data.text?.slice(0, 80));
@@ -335,6 +423,22 @@ try {
     ok('csv stranger tidak bocor data lain', (await csvS.text()).trim().split('\r\n').length === 1, 'ada baris tambahan');
   }
 
+  section('logout');
+  {
+    const out = await call('POST', '/api/auth/logout', { token: tokenA });
+    ok('logout 200', out.status === 200 && out.data.ok === true, JSON.stringify(out.data));
+    const dead = await call('GET', '/api/auth/me', { token: tokenA });
+    ok('token mati setelah logout', dead.status === 401, `status ${dead.status}`);
+    const chatDead = await call('POST', '/api/chat', { token: tokenA, body: { text: 'gaji 1rb' } });
+    ok('token mati untuk chat juga', chatDead.status === 401, `status ${chatDead.status}`);
+
+    // login ulang menghasilkan token baru yang hidup
+    const re = await call('POST', '/api/auth/login', { body: { email: emailA, password: 'rahasia123' } });
+    ok('login ulang setelah logout', re.status === 200 && !!re.data.token, JSON.stringify(re.data).slice(0, 80));
+    tokenA = re.data.token;
+    ok('token baru bisa dipakai', (await call('GET', '/api/auth/me', { token: tokenA })).status === 200);
+  }
+
   section('penanganan error');
   {
     const noText = await call('POST', '/api/chat', { token: tokenA, body: {} });
@@ -343,10 +447,9 @@ try {
     const noHouse = await call('GET', `/api/state?household=00000000-0000-0000-0000-000000000000`, { token: tokenA });
     ok('household asing -> 403', noHouse.status === 403, JSON.stringify(noHouse.data));
 
-    const emptyEnv = { ...env, SUPABASE_ANON_KEY: '' };
-    const r2 = await worker.fetch(new Request('https://app.test/api/state'), emptyEnv, {});
-    const body2 = await r2.text();
-    ok('env hilang -> pesan jelas', body2.includes('SUPABASE'), body2.slice(0, 100));
+    const noDb = await worker.fetch(new Request('https://app.test/api/state'), { ASSETS: assets }, {});
+    const noDbBody = await noDb.text();
+    ok('env tanpa DB -> pesan jelas', noDb.status === 500 && /D1/.test(noDbBody), noDbBody.slice(0, 100));
   }
 } catch (e) {
   failures.push('CRASH: ' + e.message);
@@ -355,7 +458,7 @@ try {
 
 /* ---------------- hasil ---------------- */
 
-mock.close();
+globalThis.fetch = realFetch;
 
 console.log(`\n${pass} passed, ${failures.length} failed`);
 if (failures.length) {

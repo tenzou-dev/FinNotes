@@ -12,10 +12,20 @@ directory = "../public"
 binding = "ASSETS"
 run_worker_first = true
 
-# Nilai non-secret (aman ditulis di file).
-# Ganti dengan URL project Supabase kamu.
-[vars]
-SUPABASE_URL = "https://uuqlsxpmrefxhldkimpv.supabase.co"
+# Database D1. `wrangler dev` otomatis memakai salinan lokal dari binding ini.
+# Ganti database_id dengan milikmu (dashboard Cloudflare -> Storage & Databases).
+[[d1_databases]]
+binding = "DB"
+database_name = "finnotes"
+database_id = "5877af40-8d0d-4b1c-83e5-8bab5ee99708"
 
-# SUPABASE_ANON_KEY JANGAN ditulis di sini.
-# Pakai: npx wrangler secret put SUPABASE_ANON_KEY
+# Nilai non-secret (aman ditulis di file).
+[vars]
+# Iterasi PBKDF2 untuk hash password. Default 10000 (~3,5ms CPU di Workers
+# free plan, limit 10ms). Format hash menyimpan iterasinya, jadi nilai ini
+# boleh dinaikkan kapan saja tanpa memutus user lama.
+PBKDF2_ITERATIONS = "10000"
+
+# Client ID Google OAuth untuk tombol "Lanjut dengan Google" (opsional).
+# Isi lalu buka tanda komentarnya untuk mengaktifkan:
+# GOOGLE_CLIENT_ID = "GANTI-DENGAN-CLIENT-ID.apps.googleusercontent.com"

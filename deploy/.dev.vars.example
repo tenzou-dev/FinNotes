@@ -1,5 +1,5 @@
 # Salin ke .dev.vars untuk `npm run dev` lokal (jangan di-commit).
-# Untuk deploy, pakai `npx wrangler secret put SUPABASE_ANON_KEY` - bukan file ini.
+# Binding D1 (lokal otomatis) dan vars lain sudah ada di wrangler.toml.
 
-SUPABASE_URL="https://GANTI-DENGAN-PROJECT-ID.supabase.co"
-SUPABASE_ANON_KEY="GANTI-DENGAN-ANON-PUBLIC-KEY"
+# Client ID Google OAuth untuk tombol "Lanjut dengan Google" (opsional).
+GOOGLE_CLIENT_ID="GANTI-DENGAN-CLIENT-ID.apps.googleusercontent.com"

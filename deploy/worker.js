@@ -1,8 +1,9 @@
 /**
  * Worker Cloudflare untuk FinNotes.
  *
- * Semua query memakai token user (bearer), tidak pernah service_role,
- * jadi Row Level Security Supabase tetap berlaku.
+ * Semua data disimpan di Cloudflare D1 lewat binding DB (wrangler.toml);
+ * autentikasi memakai sesi sendiri (bearer token, tabel sessions) — tidak
+ * ada lagi service_role atau pihak ketiga.
  *
  * Aset statis (public/) dilayani lewat binding ASSETS dari [assets]
  * di wrangler.toml, bukan oleh Worker ini.
@@ -15,8 +16,10 @@ import { attachUser, requireAuth, requireHousehold, ctxOf } from './src/auth.js'
 import analytics from '../src/analytics.js';
 import csv from '../src/csv.js';
 import assistant from '../src/assistant.js';
+import oidc from '../src/oidc.js';
 
 const { handleMessage, confirmType, formatDate, txCard } = assistant;
+const { verifyGoogleIdToken } = oidc;
 
 const store = getStore();
 const router = new Router();
@@ -25,8 +28,9 @@ const router = new Router();
 
 router.get('/api/config', (req, reply) => {
   reply({
-    backend: 'supabase',
-    supabase: { url: req.env.SUPABASE_URL, anonKey: req.env.SUPABASE_ANON_KEY },
+    backend: 'd1',
+    local: false,
+    googleClientId: req.env.GOOGLE_CLIENT_ID || null,
   });
 });
 
@@ -36,37 +40,7 @@ router.post('/api/auth/signup', async (req, reply) => {
   try {
     const { email, password, name, householdName, joinCode } = req.body || {};
     const r = await store.signUp({ email, password, name, householdName, joinCode });
-    const token = r.access_token || r.session?.access_token;
-    if (!token) throw new Error('Signup berhasil tapi token tidak diterima');
-    const session = {
-      access_token: token,
-      refresh_token: r.refresh_token || r.session?.refresh_token || null,
-      expires_at: r.expires_at || r.session?.expires_at || Math.floor(Date.now() / 1000) + 3600,
-    };
-
-    let warning = null;
-    let household = null;
-    const clean = String(joinCode || '').trim();
-    if (clean) {
-      try {
-        household = await store.joinHousehold(token, clean);
-      } catch (joinErr) {
-        // akun sudah dibuat, jadi jangan tinggalkan user tanpa household
-        household = await store.createHousehold(token, householdName || 'Rumah Tangga');
-        warning = joinErr.message;
-      }
-    } else {
-      household = await store.createHousehold(token, householdName || 'Rumah Tangga');
-    }
-
-    reply({
-      user: r.user || r.session?.user,
-      household,
-      token,
-      ...session,
-      warning,
-      backend: 'supabase',
-    });
+    reply({ ...r, backend: 'd1' });
   } catch (e) {
     reply({ error: e.message }, 400);
   }
@@ -76,64 +50,41 @@ router.post('/api/auth/login', async (req, reply) => {
   try {
     const { email, password } = req.body || {};
     const r = await store.signIn({ email, password });
-    const token = r.access_token || r.session?.access_token;
-    const households = await store.listHouseholds(token, r.user.id);
-    reply({
-      user: r.user || r.session?.user,
-      households,
-      token,
-      access_token: token,
-      refresh_token: r.refresh_token || r.session?.refresh_token || null,
-      expires_at: r.expires_at || r.session?.expires_at || Math.floor(Date.now() / 1000) + 3600,
-      backend: 'supabase',
-    });
+    reply({ ...r, backend: 'd1' });
   } catch (e) {
     reply({ error: e.message }, 401);
   }
 });
 
-router.post('/api/auth/logout', (req, reply) => reply({ ok: true }));
-
-/**
- * Melengkapi login Google OAuth.
- *
- * Browser dialihkan ke {SUPABASE_URL}/auth/v1/authorize?provider=google,
- * lalu kembali ke login.html membawa access_token di URL hash. Frontend
- * mengirim token itu ke endpoint ini supaya Worker memverifikasinya dan
- * memastikan profile + household ada - persis seperti signup email/password.
- * Klien tetap tidak pernah menulis data aplikasi langsung ke Supabase.
- *
- * RPC setup_my_household bersifat idempotent: user lama mendapat household
- * yang sudah dimilikinya, user baru mendapat household baru.
- */
-router.post('/api/auth/google', async (req, reply) => {
+router.post('/api/auth/logout', async (req, reply) => {
   const h = req.headers.get('authorization') || '';
   const token = h.startsWith('Bearer ') ? h.slice(7).trim() : '';
-  if (!token) return reply({ error: 'Token Google tidak diterima' }, 401);
+  await store.logout(token);
+  reply({ ok: true });
+});
+
+/**
+ * Login "Lanjut dengan Google" (GIS). Frontend mengirim credential (ID
+ * token JWT) ke endpoint ini; Worker memverifikasi tanda tangan + klaim
+ * lewat JWKS Google, lalu membuat/menghubungkan akun + household
+ * server-side. Klien tetap tidak pernah menulis data langsung.
+ */
+router.post('/api/auth/google', async (req, reply) => {
   try {
-    const session = await store.getSession(token);
-    if (!session) return reply({ error: 'Sesi Google tidak valid, silakan coba lagi' }, 401);
-    const household = await store.createHousehold(token, req.body?.householdName || 'Rumah Tangga');
-    reply({
-      user: session.user,
-      household,
-      households: session.households?.length ? session.households : [household],
-      token,
-      access_token: token,
-      refresh_token: req.body?.refresh_token || null,
-      expires_at: req.body?.expires_at || Math.floor(Date.now() / 1000) + 3600,
-      backend: 'supabase',
-    });
+    const clientId = req.env.GOOGLE_CLIENT_ID || '';
+    const credential = String(req.body?.credential || '').trim();
+    const profile = await verifyGoogleIdToken(credential, clientId);
+    const r = await store.signInWithGoogle(profile);
+    reply({ ...r, backend: 'd1' });
   } catch (e) {
     reply({ error: e.message }, 400);
   }
 });
 
-
 router.get('/api/auth/me', async (req, reply) => {
   await attachUser(req);
   if (!requireAuth(req, reply)) return;
-  reply({ user: req.user, households: req.households, backend: 'supabase' });
+  reply({ user: req.user, households: req.households, backend: 'd1' });
 });
 
 router.post('/api/households', async (req, reply) => {
@@ -320,7 +271,7 @@ export default {
     }
 
     try {
-      boot(env);
+      await boot(env);
     } catch (e) {
       return json({ error: e.message }, 500);
     }
