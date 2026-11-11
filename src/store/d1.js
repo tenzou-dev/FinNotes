@@ -46,7 +46,10 @@ async function ensureSchema() {
   // tabel belum ada (semua statement idempotent).
   const probe = await rawFirst("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'");
   if (probe) return;
-  for (const stmt of SCHEMA_STATEMENTS) DB.exec(stmt);
+  // WAJIB await: exec() di binding D1 asli itu async -- tanpa await, DDL
+  // mengambang dan query pertama bisa lebih dulu (no such table). Di adapter
+  // node:sqlite exec() sinkron, await tetap aman.
+  for (const stmt of SCHEMA_STATEMENTS) await DB.exec(stmt);
 }
 
 async function gate() {
