@@ -16,6 +16,11 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* [hidden] harus selalu menang atas display dari rule lain
+   (mis. .sheet yang memakai display: grid) — tanpa ini sheet
+   edit terus terlihat dan tidak bisa ditutup. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   background: var(--bg);
