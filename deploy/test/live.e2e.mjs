@@ -124,6 +124,10 @@ try {
   ok('token ngawur -> 401', (await call('GET', '/api/auth/me', { token: 'tok_palsu' })).status === 401);
   ok('chat tanpa login -> 401', (await call('POST', '/api/chat', { body: { text: 'x' } })).status === 401);
   ok('chat tanpa text -> 400', (await call('POST', '/api/chat', { token: tA, body: {} })).status === 400);
+  // endpoint google oauth: tanpa kredensial Google alur penuh tidak bisa
+  // diuji, tapi gate-nya harus hidup dan menolak token kosong/ngawur.
+  ok('google tanpa token -> 401', (await call('POST', '/api/auth/google', { body: {} })).status === 401);
+  ok('google token ngawur -> 401', (await call('POST', '/api/auth/google', { token: 'bukan-token-google', body: {} })).status === 401);
 
   section('export');
   const csv = await fetch(B + '/api/export/transactions.csv', { headers: { Authorization: 'Bearer ' + tB } });

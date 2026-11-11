@@ -1,6 +1,6 @@
 'use strict';
 
-import { initAuth, getSession, saveSession, apiJson } from './api.js';
+import { initAuth, getSession, saveSession, apiJson, getSupa } from './api.js';
 
 const $ = (s) => document.querySelector(s);
 const form = $('#authForm');
@@ -89,16 +89,76 @@ form.onsubmit = async (e) => {
   }
 };
 
+/* ---------------- Google OAuth ---------------- */
+
+const btnGoogle = $('#btnGoogle');
+const btnGoogleLabel = $('#btnGoogleLabel');
+
+function startGoogle() {
+  const supa = getSupa();
+  if (!supa) return fail('Login Google hanya tersedia di mode online');
+  btnGoogle.disabled = true;
+  btnGoogleLabel.textContent = 'Mengalihkan ke Google...';
+  const redirectTo = new URL('login.html', location.href).href;
+  location.href = supa.oauthUrl('google', redirectTo);
+}
+
+/**
+ * Deteksi balikan OAuth: Supabase mengarahkan kembali ke halaman ini dengan
+ * token di URL hash (#access_token=...&refresh_token=...). Kirim token ke
+ * Worker supaya profile + household dibuat server-side, lalu masuk app.
+ * Return true kalau hash berisi hasil OAuth (sukses maupun error).
+ */
+async function handleOAuthReturn() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const accessToken = p.get('access_token');
+  const oauthError = p.get('error_description') || p.get('error');
+  if (!accessToken && !oauthError) return false;
+
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!accessToken) {
+    fail(oauthError || 'Login Google dibatalkan');
+    return true;
+  }
+
+  btnGoogle.disabled = true;
+  btnGoogleLabel.textContent = 'Menyelesaikan login...';
+  const expiresIn = Number(p.get('expires_in') || 3600);
+  try {
+    const j = await apiJson('/api/auth/google', {
+      method: 'POST',
+      retry: false,
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        refresh_token: p.get('refresh_token'),
+        expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+      }),
+    });
+    saveAuthSession(j, 'Login Google');
+    location.href = './';
+  } catch (e) {
+    fail(e.message);
+    btnGoogle.disabled = false;
+    btnGoogleLabel.textContent = 'Lanjutkan dengan Google';
+  }
+  return true;
+}
+
+btnGoogle.onclick = startGoogle;
+
 (async () => {
   try {
     const { config } = await initAuth();
     ready = true;
     if (config.backend === 'supabase') {
       $('#authHint').textContent = 'Akun & data disimpan di Supabase.';
+      btnGoogle.hidden = false;
+      $('#authAlt').hidden = false;
     } else {
       $('#authHint').textContent = 'Mode lokal (SQLite). Set SUPABASE_URL + SUPABASE_ANON_KEY untuk pindah ke Supabase.';
     }
-    if (getSession()) location.href = './';
+    const oauthHandled = await handleOAuthReturn();
+    if (!oauthHandled && getSession()) location.href = './';
   } catch (e) {
     ready = true;
     $('#authHint').textContent = 'Gagal cek konfigurasi: ' + e.message;

@@ -11,7 +11,7 @@
  * Jalankan: node deploy/test/worker.test.mjs
  */
 
-import { createMockSupabase, ANON_KEY, reset } from '../mock-supabase.mjs';
+import { createMockSupabase, ANON_KEY, reset, db } from '../mock-supabase.mjs';
 import worker from '../worker.js';
 
 /* ---------------- harness ---------------- */
@@ -149,6 +149,48 @@ try {
     ok('tanpa token -> 401', noTok.status === 401);
     const badTok = await call('GET', '/api/auth/me', { token: 'tok_palsu' });
     ok('token ngawur -> 401', badTok.status === 401);
+  }
+
+  section('login google (oauth)');
+  {
+    const noTok = await call('POST', '/api/auth/google', { body: {} });
+    ok('google tanpa token -> 401', noTok.status === 401, JSON.stringify(noTok.data));
+
+    const badTok = await call('POST', '/api/auth/google', { token: 'tok_palsu', body: {} });
+    ok('google token ngawur -> 401', badTok.status === 401, JSON.stringify(badTok.data));
+
+    // simulasi user yang dibuat lewat Google OAuth: tanpa password, nama
+    // asli ada di user_metadata.full_name (bukan display_name)
+    const gid = crypto.randomUUID();
+    const gEmail = `budi.google.${stamp}@gmail.com`;
+    db.authUsers.push({
+      id: gid, email: gEmail, password: null,
+      user_metadata: { full_name: 'Budi Google', email: gEmail },
+      created_at: new Date().toISOString(),
+    });
+    db.profiles.push({ id: gid, email: gEmail, display_name: 'Budi Google' });
+    db.sessions.set(`tok_${gid}`, gid);
+    const gTok = `tok_${gid}`;
+
+    const g = await call('POST', '/api/auth/google', {
+      token: gTok,
+      body: { refresh_token: `ref_${gid}`, expires_at: 123456 },
+    });
+    ok('google login 200', g.status === 200, JSON.stringify(g.data).slice(0, 160));
+    ok('google mengembalikan token', g.data.token === gTok, String(g.data.token));
+    ok('google memakai nama dari Google', g.data.user?.name === 'Budi Google', JSON.stringify(g.data.user));
+    ok('google membuat household', !!g.data.household?.id, JSON.stringify(g.data.household));
+    ok('google echo refresh_token dari body', g.data.refresh_token === `ref_${gid}`, String(g.data.refresh_token));
+    ok('google echo expires_at dari body', g.data.expires_at === 123456, String(g.data.expires_at));
+
+    // pemanggilan ulang (mis. login Google berikutnya) tidak membuat household baru
+    const g2 = await call('POST', '/api/auth/google', { token: gTok, body: {} });
+    ok('google ulang -> household sama', g2.status === 200 && g2.data.household?.id === g.data.household?.id,
+      `${g2.data.household?.id} vs ${g.data.household?.id}`);
+
+    // user google bisa langsung pakai app seperti user biasa
+    const chat = await call('POST', '/api/chat', { token: gTok, body: { text: 'gaji 2jt' } });
+    ok('user google bisa chat transaksi', chat.status === 200 && chat.data.transaction?.amount === 2000000, JSON.stringify(chat.data).slice(0, 140));
   }
 
   section('chat multi-transaksi & data bersama');

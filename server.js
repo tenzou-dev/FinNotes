@@ -149,6 +149,37 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Melengkapi login Google OAuth (backend Supabase). Browser dialihkan ke
+ * {SUPABASE_URL}/auth/v1/authorize?provider=google lalu kembali ke login.html
+ * dengan access_token di hash; frontend mengirim token itu ke endpoint ini.
+ * Worker/server memverifikasi token dan menyiapkan profile + household
+ * (setup_my_household idempotent) - klien tetap tidak menulis langsung.
+ */
+app.post('/api/auth/google', attachUser, async (req, res) => {
+  if (store.BACKEND !== 'supabase') {
+    return res.status(400).json({ error: 'Login Google hanya tersedia di mode Supabase' });
+  }
+  const token = tokenFrom(req);
+  if (!token) return res.status(401).json({ error: 'Token Google tidak diterima' });
+  if (!req.user) return res.status(401).json({ error: 'Sesi Google tidak valid, silakan coba lagi' });
+  try {
+    const household = await store.createHousehold(token, req.body?.householdName || 'Rumah Tangga');
+    res.json({
+      user: req.user,
+      household,
+      households: req.households?.length ? req.households : [household],
+      token,
+      access_token: token,
+      refresh_token: req.body?.refresh_token || null,
+      expires_at: req.body?.expires_at || Math.floor(Date.now() / 1000) + 3600,
+      backend: store.BACKEND,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.get('/api/auth/me', attachUser, requireAuth, (req, res) => {
   res.json({ user: req.user, households: req.households || [], backend: store.BACKEND });
 });

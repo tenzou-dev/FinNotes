@@ -61,6 +61,7 @@ npm run tail
 
 - **Express + SQLite** hanya dipakai untuk development lokal (`npm start` di root). Worker **tidak** memuat `src/store/sqlite.js` atau `src/config.js`.
 - **Satu jalur auth**: frontend selalu memanggil `/api/auth/signup` dan `/api/auth/login`. Di mode Supabase, Worker yang membuat/menggabungkan household lewat RPC (`security definer`). Ini menjamin user **selalu punya household** (kalau kode undangan ditolak, Worker membuat household cadangan dan mengembalikan `warning`). Jangan diubah kembali supaya klien mendaftar langsung ke Supabase Auth.
+- **Google OAuth**: tombol Google mengalihkan browser ke `{SUPABASE_URL}/auth/v1/authorize?provider=google`; Supabase kembali ke `login.html` dengan access_token di URL hash, frontend mengirimkannya ke `POST /api/auth/google`, Worker memverifikasi token lalu menjalankan RPC `setup_my_household` (idempotent: user lama tetap dapat household-nya). Tetap satu jalur auth lewat Worker. Aktifkan provider Google di Supabase Dashboard -> Authentication -> Providers -> Google.
 - **Token strategy**: Worker mode Supabase memakai **Bearer access_token** + `refresh_token` (dikembalikan di respons signup/login agar sesi bisa diperpanjang). Server lokal memakai **cookie session** sehingga `token: null` dan `backend: "sqlite"` — `saveAuthSession()` di `public/auth.js` yang membedakan keduanya.
 - **RLS enforced**: semua request mengirim Bearer user, tidak ada `service_role`. Pastikan schema.sql ter-aplikasi.
 - **Module CJS** di `src/*` dibungkus Wrangler (ESM worker). Adapter Supabase dikonfigurasi dari binding `env` di `deploy/src/runtime.js`.
@@ -73,6 +74,9 @@ npm run tail
 | RPC `setup_my_household/join_household` gagal 403 | Function privileges/grant | Pastikan di SQL Editor grant EXECUTE ke `authenticated` (sudah ada di schema). |
 | User terjebak tanpa household | UI signUp langsung ke Supabase Auth | Pastikan frontend memakai endpoint Worker (sudah diperbaiki). |
 | `token: null` saat test manual | Itu benar untuk backend SQLite (cookie session) | Cek `backend` di respons. Kalau backend `supabase` dan `token` null, itu bug. |
+| Tombol Google tidak muncul | Backend bukan `supabase` (mode lokal) atau `/api/config` gagal | Tombol hanya relevan untuk mode cloud. |
+| Klik Google -> error provider | Provider Google belum aktif di Supabase | Authentication -> Sign In / Providers -> Google: aktifkan + isi Client ID/Secret dari Google Cloud Console. |
+| Balik dari Google -> `Sesi Google tidak valid` | Token di hash kedaluwarsa atau Supabase redirect URL belum diizinkan | Cek Authentication -> URL Configuration (Redirect URLs harus memuat domain app). |
 | `DELETE` balas 405 | Router memilih route dengan pathname sama tapi method beda | `match()` di `deploy/src/router.js` sudah prioritise route method yang sama. |
 
 ## Catatan

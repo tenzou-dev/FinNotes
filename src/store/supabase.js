@@ -70,7 +70,11 @@ async function getUserFromToken(accessToken) {
 }
 
 async function ensureProfile(sb, user) {
-  const name = user.user_metadata?.display_name || (user.email || '').split('@')[0];
+  // full_name/name: metadata yang dikirim provider OAuth (Google).
+  const name = user.user_metadata?.display_name
+    || user.user_metadata?.full_name
+    || user.user_metadata?.name
+    || (user.email || '').split('@')[0];
   const existing = unwrap(
     await sb.from('profiles').select('id, display_name, email').eq('id', user.id).maybeSingle(),
     'profile'

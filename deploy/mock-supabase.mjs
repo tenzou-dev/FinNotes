@@ -132,9 +132,13 @@ async function handleAuth(req, res, url) {
     };
     db.authUsers.push(user);
     // trigger handle_new_user() di schema.sql membuat baris profiles
+    // (display_name -> full_name -> name -> prefix email, sama seperti aslinya)
     db.profiles.push({
       id: user.id, email,
-      display_name: user.user_metadata.display_name || email.split('@')[0],
+      display_name: user.user_metadata.display_name
+        || user.user_metadata.full_name
+        || user.user_metadata.name
+        || email.split('@')[0],
     });
     db.sessions.set(`tok_${user.id}`, user.id);
     return send(res, 200, sessionPayload(user));

@@ -181,6 +181,11 @@ const me = (jar) => call(jar, 'GET', '/api/auth/me');
   const wrongPass = await call(jar(), 'POST', '/api/auth/login', { email: emailA, password: 'salahpassword' });
   ok('password salah ditolak', wrongPass.status === 401, `status ${wrongPass.status}`);
 
+  // endpoint google hanya relevan untuk backend supabase; di mode sqlite
+  // harus menolak dengan pesan jelas, bukan crash
+  const google = await call(jar(), 'POST', '/api/auth/google', {});
+  ok('google di mode sqlite -> 400 pesan jelas', google.status === 400 && /supabase/i.test(google.data.error || ''), JSON.stringify(google.data));
+
   const sFinal = await state(relogin);
   ok('saldo konsisten setelah login ulang', sFinal.data.totals.balance === afterDelete, JSON.stringify(sFinal.data.totals));
   ok('jumlah transaksi tetap', sFinal.data.totals.count === beforePatch.count - 1, `${sFinal.data.totals.count} vs ${beforePatch.count - 1}`);

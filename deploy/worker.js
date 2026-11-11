@@ -94,6 +94,42 @@ router.post('/api/auth/login', async (req, reply) => {
 
 router.post('/api/auth/logout', (req, reply) => reply({ ok: true }));
 
+/**
+ * Melengkapi login Google OAuth.
+ *
+ * Browser dialihkan ke {SUPABASE_URL}/auth/v1/authorize?provider=google,
+ * lalu kembali ke login.html membawa access_token di URL hash. Frontend
+ * mengirim token itu ke endpoint ini supaya Worker memverifikasinya dan
+ * memastikan profile + household ada - persis seperti signup email/password.
+ * Klien tetap tidak pernah menulis data aplikasi langsung ke Supabase.
+ *
+ * RPC setup_my_household bersifat idempotent: user lama mendapat household
+ * yang sudah dimilikinya, user baru mendapat household baru.
+ */
+router.post('/api/auth/google', async (req, reply) => {
+  const h = req.headers.get('authorization') || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7).trim() : '';
+  if (!token) return reply({ error: 'Token Google tidak diterima' }, 401);
+  try {
+    const session = await store.getSession(token);
+    if (!session) return reply({ error: 'Sesi Google tidak valid, silakan coba lagi' }, 401);
+    const household = await store.createHousehold(token, req.body?.householdName || 'Rumah Tangga');
+    reply({
+      user: session.user,
+      household,
+      households: session.households?.length ? session.households : [household],
+      token,
+      access_token: token,
+      refresh_token: req.body?.refresh_token || null,
+      expires_at: req.body?.expires_at || Math.floor(Date.now() / 1000) + 3600,
+      backend: 'supabase',
+    });
+  } catch (e) {
+    reply({ error: e.message }, 400);
+  }
+});
+
+
 router.get('/api/auth/me', async (req, reply) => {
   await attachUser(req);
   if (!requireAuth(req, reply)) return;

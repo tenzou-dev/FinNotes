@@ -17,6 +17,7 @@ Multi-user: dua akun (misalnya kamu dan partnermu) melihat **buku keuangan yang 
 - Parser bahasa Indonesia tanpa API eksternal: `gaji 8jt`, `beli nasi 25rb sama kopi 15rb`
 - Multi-transaksi per pesan, format `1,2jt` dan `1.000.000` aman
 - Multi-user dengan satu household bersama, pendaftaran lewat **kode undangan**
+- Masuk dengan **akun Google** (OAuth), opsional - lihat bagian Google Sign-In
 - Grafik: donat kategori, batang harian, perbandingan periode
 - Export CSV (transaksi dan rekap) plus backup JSON
 - Edit dan hapus transaksi dari UI
@@ -105,6 +106,42 @@ npm start
 1. Daftar akun pertama, isi nama buku, misalnya `Rumah`
 2. Menu **Anggota** di aplikasi -> salin **kode undangan**
 3. Orang kedua mendaftar dengan kode tersebut -> langsung masuk ke buku yang sama
+
+## Google Sign-In (opsional)
+
+Tombol **Lanjutkan dengan Google** otomatis muncul di halaman login saat
+backend Supabase dipakai. Supabase perlu dikonfigurasi sekali:
+
+### 1. Google Cloud Console
+
+1. Buka <https://console.cloud.google.com/apis/credentials> (buat / pilih project).
+2. **OAuth consent screen**: External, isi nama app + email support, lalu
+   **Publish app** supaya bisa dipakai siapa pun (scope yang diminta hanya
+   `openid email profile`, tidak perlu proses verifikasi Google).
+3. **Create Credentials -> OAuth client ID -> Web application**:
+   - Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`
+   - Simpan **Client ID** dan **Client Secret**.
+
+### 2. Supabase Dashboard
+
+1. **Authentication -> Sign In / Providers -> Google**: aktifkan, tempel
+   Client ID + Client Secret.
+2. **Authentication -> URL Configuration**:
+   - Site URL: domain produksi, misalnya `https://finnotes.tenzou.dev`
+   - Redirect URLs: tambahkan `https://<domain-produksi>/**` dan
+     `http://localhost:3000/**` (untuk development).
+
+### 3. Jalankan ulang schema
+
+Jalankan ulang [`supabase/schema.sql`](supabase/schema.sql) di SQL Editor.
+Trigger `handle_new_user` versi baru ikut menyimpan nama Google
+(`full_name` di metadata) sebagai nama user, bukan hanya prefix email.
+
+Alur sign-in-nya: tombol Google -> consent Google -> kembali ke
+`login.html` membawa token di URL hash -> frontend mengirim token ke
+`POST /api/auth/google` -> Worker memverifikasi dan menyiapkan profile +
+household, sama seperti signup email/password. User Google dengan email yang
+sudah terdaftar otomatis tersambung ke akun lama.
 
 ## Testing
 

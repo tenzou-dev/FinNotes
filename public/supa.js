@@ -71,5 +71,16 @@ export function createSupabaseLite(url, anonKey) {
       if (!res.ok) return null;
       return res.json();
     },
+
+    /**
+     * URL untuk memulai OAuth (misal provider 'google'). Browser dialihkan
+     * ke URL ini, lalu Supabase mengembalikannya ke `redirectTo` dengan
+     * access_token di URL hash (implicit flow). Tidak perlu apikey:
+     * /authorize memang dirancang untuk navigasi browser.
+     */
+    oauthUrl(provider, redirectTo) {
+      const q = `provider=${encodeURIComponent(provider)}&redirect_to=${encodeURIComponent(redirectTo)}`;
+      return `${base}/authorize?${q}`;
+    },
   };
 }
