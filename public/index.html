@@ -58,9 +58,9 @@
     </div>
     <div class="menu-members" id="members"></div>
     <div class="menu-acts">
-      <a class="menu-link" href="/api/export/transactions.csv">Export Transaksi (CSV)</a>
-      <a class="menu-link" href="/api/export/summary.csv">Export Rekap (CSV)</a>
-      <a class="menu-link" href="/api/export/json">Backup JSON</a>
+      <button class="menu-link" type="button" data-export="/api/export/transactions.csv">Export Transaksi (CSV)</button>
+      <button class="menu-link" type="button" data-export="/api/export/summary.csv">Export Rekap (CSV)</button>
+      <button class="menu-link" type="button" data-export="/api/export/json">Backup JSON</button>
       <button class="menu-link danger" id="btnReset">Hapus semua transaksi</button>
       <button class="menu-link" id="btnLogout">Keluar</button>
     </div>
@@ -137,11 +137,11 @@
   <p class="empty" id="txEmpty">Belum ada transaksi. Mulai catat lewat chat di bawah.</p>
 </section>
 
-<section class="chat" id="chat">
-  <div class="chat-log" id="chatLog"></div>
+<section class="chat" id="chat" aria-label="Chat pencatatan">
+  <div class="chat-log" id="chatLog" aria-live="polite"></div>
   <div class="chat-suggest" id="suggest"></div>
   <form class="chat-input" id="chatForm">
-    <button type="button" class="icon-btn ghost" id="btnHelp" title="Bantuan">?</button>
+    <button type="button" class="icon-btn ghost" id="btnChatToggle" title="Buka chat" aria-label="Buka chat" aria-expanded="false" aria-controls="chatLog"><svg class="chat-chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <input id="msgInput" type="text" placeholder="Tulis transaksi, misal: gaji 1jt" autocomplete="off" enterkeyhint="send" />
     <button type="submit" class="send-btn" aria-label="Kirim"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 12h13M12 6l7 6-7 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </form>

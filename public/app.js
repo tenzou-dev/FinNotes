@@ -11,6 +11,7 @@ const el = {
   bars: $('#bars'), barsAxis: $('#barsAxis'),
   txList: $('#txList'), txEmpty: $('#txEmpty'), txCount: $('#txCount'), search: $('#search'),
   chatLog: $('#chatLog'), chatForm: $('#chatForm'), msgInput: $('#msgInput'),
+  chat: $('#chat'), btnChatToggle: $('#btnChatToggle'),
   suggest: $('#suggest'), toast: $('#toast'),
   sheet: $('#sheet'), sheetTitle: $('#sheetTitle'),
   sNote: $('#sNote'), sAmount: $('#sAmount'), sDate: $('#sDate'), sCategory: $('#sCategory'),
@@ -206,6 +207,16 @@ function renderTx() {
 
 /* ---------------- chat ---------------- */
 
+function setChatOpen(open) {
+  el.chat.classList.toggle('is-open', open);
+  el.btnChatToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  el.btnChatToggle.title = open ? 'Kecilkan chat' : 'Buka chat';
+  el.btnChatToggle.setAttribute('aria-label', el.btnChatToggle.title);
+  if (open) requestAnimationFrame(() => { el.chatLog.scrollTop = el.chatLog.scrollHeight; });
+}
+
+const chatIsOpen = () => el.chat.classList.contains('is-open');
+
 function addMsg(role, text, time, extra) {
   const div = document.createElement('div');
   div.className = 'msg ' + role + (role === 'bot' && extra?.isError ? ' err' : '');
@@ -307,6 +318,7 @@ async function postChat(payload) {
 async function send() {
   const text = el.msgInput.value.trim();
   if (!text) return;
+  setChatOpen(true);
   el.msgInput.value = '';
   addMsg('user', text, now());
   const thinking = addMsg('bot', '…', '');
@@ -323,6 +335,7 @@ async function send() {
 }
 
 async function sendType(draft, type) {
+  setChatOpen(true);
   addMsg('user', type === 'income' ? 'Ya, pemasukan' : 'Tidak, pengeluaran', now());
   const thinking = addMsg('bot', '…', '');
   try {
@@ -400,8 +413,20 @@ async function boot() {
   }
 }
 
-el.chatForm.addEventListener('submit', (e) => { e.preventDefault(); send(); });
-$('#btnHelp').onclick = () => { el.msgInput.value = 'bantu'; send(); };
+el.chatForm.addEventListener('submit', (e) => { e.preventDefault(); setChatOpen(true); send(); });
+el.btnChatToggle.onclick = () => {
+  const open = !chatIsOpen();
+  setChatOpen(open);
+  if (open) el.msgInput.focus();
+};
+el.msgInput.addEventListener('focus', () => setChatOpen(true));
+el.msgInput.addEventListener('input', () => setChatOpen(true));
+// klik di mana pun pada bar ringkas juga membuka chat
+el.chat.addEventListener('click', (e) => {
+  if (chatIsOpen() || e.target.closest('#btnChatToggle')) return;
+  setChatOpen(true);
+  el.msgInput.focus();
+});
 
 el.search.addEventListener('input', (e) => { state.query = e.target.value; renderTx(); });
 
@@ -453,8 +478,50 @@ el.txList.addEventListener('click', async (e) => {
 });
 
 $('#btnMenu').onclick = () => { el.menu.hidden = !el.menu.hidden; };
+
+const EXPORT_FALLBACK = {
+  '/api/export/transactions.csv': 'transaksi-finnotes.csv',
+  '/api/export/summary.csv': 'rekap-finnotes.csv',
+  '/api/export/json': 'backup-finnotes.json',
+};
+
+async function downloadExport(url) {
+  try {
+    // Link biasa tidak membawa header Authorization -> 401 "Belum login".
+    // Jadi unduh lewat fetch ber-token, lalu buat blob URL untuk disimpan.
+    const res = await apiFetch(url);
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { const b = await res.json(); msg = b.error || msg; } catch { }
+      throw new Error(msg);
+    }
+    const disp = res.headers.get('content-disposition') || '';
+    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
+    const name = m ? decodeURIComponent(m[1]) : EXPORT_FALLBACK[url] || 'export';
+    const href = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 2000);
+    toast('Export diunduh: ' + name);
+  } catch (e) {
+    toast('Gagal export: ' + e.message);
+  }
+}
+
+el.menu.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-export]');
+  if (!btn) return;
+  el.menu.hidden = true;
+  downloadExport(btn.dataset.export);
+});
+
 document.addEventListener('click', (e) => {
   if (!el.menu.hidden && !el.menu.contains(e.target) && e.target !== $('#btnMenu')) el.menu.hidden = true;
+  if (chatIsOpen() && !el.chat.contains(e.target)) setChatOpen(false);
 });
 
 $('#btnLogout').onclick = async () => {
@@ -481,7 +548,11 @@ $('#sheetType').addEventListener('click', (e) => {
   if (!c) return;
   document.querySelectorAll('#sheetType .chip').forEach((x) => x.classList.toggle('is-active', x === c));
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el.sheet.hidden) closeSheet(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!el.sheet.hidden) closeSheet();
+  else if (chatIsOpen()) setChatOpen(false);
+});
 
 renderSuggest();
 boot();

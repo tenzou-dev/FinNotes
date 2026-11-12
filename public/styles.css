@@ -51,7 +51,8 @@ html, body {
 body {
   max-width: 720px;
   margin: 0 auto;
-  padding-bottom: 24px;
+  /* ruang untuk dock chat yang selalu menempel di bawah */
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
 
 h1, h2 { margin: 0; font-weight: 600; }
@@ -419,11 +420,17 @@ h1, h2 { margin: 0; font-weight: 600; }
 .menu-link.danger { color: var(--red); }
 .menu-note { margin: 8px 0 0; font-family: var(--font-mono); font-size: 9.5px; color: var(--muted); }
 
-/* ---------- chat: notebook di bawah ---------- */
+/* ---------- chat: dock bawah, ringkas saat diam ----------
+   Default hanya kolom ketik (tidak menutupi rekap). Saat aktif
+   (fokus/ketik/kirim) dock melebar menampilkan riwayat & saran;
+   klik di luar chat atau tombol chevron mengecilkannya lagi. */
 .chat {
-  position: sticky;
+  position: fixed;
+  left: 50%;
   bottom: 12px;
-  margin: 20px 16px 24px;
+  transform: translateX(-50%);
+  width: min(688px, calc(100% - 32px));
+  z-index: 30;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -431,8 +438,21 @@ h1, h2 { margin: 0; font-weight: 600; }
   overflow: hidden;
 }
 
+.chat:not(.is-open) .chat-log,
+.chat:not(.is-open) .chat-suggest { display: none; }
+.chat:not(.is-open) .chat-input { border-top: 0; }
+
+.chat.is-open { animation: chatOpen .16s ease; }
+@keyframes chatOpen {
+  from { opacity: .55; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
+
+.chat-chevron { display: block; transition: transform .18s ease; }
+.chat.is-open .chat-chevron { transform: rotate(180deg); }
+
 .chat-log {
-  max-height: 40vh;
+  max-height: min(45vh, 380px);
   min-height: 74px;
   overflow-y: auto;
   padding: 14px 14px 8px;
@@ -566,7 +586,7 @@ h1, h2 { margin: 0; font-weight: 600; }
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 22px;
+  bottom: calc(86px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   background: var(--ink);
   color: var(--paper);
@@ -731,4 +751,7 @@ h1, h2 { margin: 0; font-weight: 600; }
   .msg { max-width: 90%; }
   .donut { width: 132px; height: 132px; }
   .seg-btn { padding: 7px 5px 6px; }
+  .chat { bottom: 8px; width: calc(100% - 20px); }
+  .chat-log { max-height: 52vh; }
+  .toast { bottom: calc(78px + env(safe-area-inset-bottom)); }
 }
