@@ -75,6 +75,27 @@ check('2 hari lalu', parse('kopi 30rb 2 hari lalu').date, isoD2);
 check('default today', parse('kopi 30rb').date, isoToday);
 check('explicit iso', parse('gaji 1jt 2024-03-05').date, '2024-03-05');
 
+console.log('--- regresi: tanggal tidak jadi nominal ---');
+const userMsg = 'kmarin tgl 27 okt 2026 aku gajian, sbesar 1.650.000';
+const um = parse(userMsg);
+check('user msg amount', um.amount, 1650000);
+check('user msg type', um.type, 'income');
+check('user msg category', um.category, 'Gaji');
+check('user msg date', um.date, '2026-10-27');
+check('user msg note', um.note, 'Aku gajian');
+check('okt = oktober', parse('gaji 1jt 5 okt 2026').date, '2026-10-05');
+check('agt = agustus', parse('gaji 1jt 17 agt 2026').date, '2026-08-17');
+check('explicit menang dari kemarin', parse('kemarin 27/10/2026 gaji 1jt').date, '2026-10-27');
+check('iso bukan nominal', parse('gaji 1jt 2026-10-27').amount, 1000000);
+check('d/m/y bukan nominal', parse('gaji 1jt 27/10/2026').amount, 1000000);
+check('tgl hari bukan nominal', parse('gaji 1jt tgl 27').amount, 1000000);
+check('tanggal tidak masuk note', parse('kopi 30rb 5 okt 2026').note, 'Kopi');
+check('typo kemaren', parse('kopi 30rb kemaren').date, isoYest);
+check('typo kmarin', parse('kopi 30rb kmarin').date, isoYest);
+check('sebesar', parse('gaji sebesar 2jt').amount, 2000000);
+check('sbesar typo', parse('gaji sbesar 2jt').amount, 2000000);
+check('senilai', parse('bonus senilai 500rb').amount, 500000);
+
 console.log('--- note ---');
 check('note bayar angsuran', parse('bayar angsuran 350rb').note, 'Bayar angsuran');
 check('note gaji', parse('gaji 1jt').note, 'Gaji');

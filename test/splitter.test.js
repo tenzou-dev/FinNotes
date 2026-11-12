@@ -53,6 +53,20 @@ const m7 = parseMany('listrik 300rb kemarin sama wifi 250rb kemarin');
 ok('tanggal semua item', m7.items.length === 2 && m7.items[0].date === m7.items[1].date);
 ok('tanggal bukan hari ini', m7.items[0].date !== parse('x').date);
 
+console.log('--- regresi: tanggal tidak memicu split ---');
+const userMsg = 'kmarin tgl 27 okt 2026 aku gajian, sbesar 1.650.000';
+eq('user msg tidak split', splitText(userMsg), [userMsg]);
+const um = parseMany(userMsg);
+ok('user msg single', um.isMulti === false);
+eq('user msg 1 item', um.items.length, 1);
+eq('user msg hasil', [um.items[0].amount, um.items[0].type, um.items[0].category, um.items[0].date], [1650000, 'income', 'Gaji', '2026-10-27']);
+
+const md = parseMany('kopi 25rb tgl 5 okt 2026, nasi 15rb');
+ok('multi dengan tanggal tetap multi', md.isMulti === true && md.items.length === 2);
+eq('multi dengan tanggal nominal', md.items.map((i) => i.amount), [25000, 15000]);
+eq('multi dengan tanggal date', md.items[0].date, '2026-10-05');
+eq('tanggal + 1 nominal tidak split', splitText('gajian 27 okt 2026 1.650.000'), ['gajian 27 okt 2026 1.650.000']);
+
 console.log('--- regresi: single masih jalan ---');
 eq('gaji single', [parse('gaji 1jt').type, parse('gaji 1jt').amount], ['income', 1000000]);
 eq('beli nasi single', [parse('beli nasi 25rb').type, parse('beli nasi 25rb').category], ['expense', 'Makan & Minum']);
